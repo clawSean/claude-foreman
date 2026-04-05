@@ -15,16 +15,16 @@ Claude CLI executes (does the work in isolation).
 
 ## Profiles
 
-Three execution profiles control what Claude CLI can do:
+Four execution profiles control what Claude CLI can do:
 
 | Profile | Use For | Reference |
 |---|---|---|
 | `plan` | Analysis, architecture, planning — read-only | `profiles/plan.md` |
 | `implement` | Code edits, file creation, refactors | `profiles/implement.md` |
 | `review` | Code audit, PR review, quality checks | `profiles/review.md` |
+| `unsafe` | Explicit high-trust sandbox mode with broad permissions | n/a |
 
-Default model is **sonnet** (fast, lower subscription burn).
-Escalate to **opus** only when the task genuinely requires complex reasoning.
+Default model is **sonnet**. Opus is currently disabled to conserve budget.
 
 ## Dispatch Decision
 
@@ -49,7 +49,7 @@ JSON parsing, and cost tracking automatically.
 exec scripts/dispatch.sh <profile> <target_dir> "<prompt>"
 ```
 
-- `<profile>` — one of: `plan`, `implement`, `review`
+- `<profile>` — one of: `plan`, `implement`, `review`, `unsafe`
 - `<target_dir>` — absolute path to the working directory (repo or workspace folder)
 - `<prompt>` — the full task description for Claude CLI
 
@@ -73,13 +73,14 @@ exec scripts/dispatch.sh implement /Users/edgeclaw/.openclaw/workspace \
   "Reorganize the memory/notes/ directory. Consolidate duplicate entries, archive anything older than 30 days into memory/notes/archive/."
 ```
 
-### Model Escalation
+### Unsafe Profile
 
-Pass `--model opus` as a 4th arg when the task needs it:
+Use `unsafe` only when you explicitly want broad permissions in an isolated/sandboxed environment and accept the extra risk. It is for "do whatever it takes" runs, not normal use.
 
-```bash
-exec scripts/dispatch.sh implement /path/to/repo "complex task..." --model opus
-```
+Recommended rule:
+- default to `plan`, `review`, or `implement`
+- use `unsafe` only when the target is a throwaway sandbox, isolated VPS, or similarly contained environment
+- do not use `unsafe` for casual reviews, routine edits, or shared production environments
 
 ### Worktree Isolation
 
@@ -105,8 +106,7 @@ to this skill directory). Before each dispatch:
 
 If blocked, wait for the window to roll or explicitly override with `--force`.
 
-You should also prefer sonnet over opus to conserve budget. A sonnet run
-typically costs 3-5x less than opus for the same task.
+Opus is currently disabled. Sonnet only.
 
 ## Post-Execution
 
