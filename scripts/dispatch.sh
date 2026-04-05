@@ -2,7 +2,7 @@
 # claude-foreman dispatch script
 # Usage: dispatch.sh <profile> <target_dir> "<prompt>" [extra_flags...]
 #
-# Profiles: plan, implement, review
+# Profiles: plan, implement, review, unsafe
 # Extra flags: --model opus, --worktree, --force, --max-turns N
 
 set -euo pipefail
@@ -67,12 +67,18 @@ case "$PROFILE" in
     ;;
   review)
     PERM_MODE="plan"
-    ALLOWED_TOOLS="Read,Glob,Grep,Bash(git:*)"
+    ALLOWED_TOOLS="Read,Glob,Grep,WebFetch,Bash(git:*),Bash(curl:*),Bash(wget:*)"
     MAX_TURNS="${EXTRA_MAX_TURNS:-15}"
     DEFAULT_MODEL="sonnet"
     ;;
+  unsafe)
+    PERM_MODE="bypassPermissions"
+    ALLOWED_TOOLS=""
+    MAX_TURNS="${EXTRA_MAX_TURNS:-20}"
+    DEFAULT_MODEL="sonnet"
+    ;;
   *)
-    echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review)" >&2
+    echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review, unsafe)" >&2
     exit 1
     ;;
 esac
