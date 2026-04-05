@@ -22,7 +22,7 @@ Four execution profiles control what Claude CLI can do:
 | `plan` | Analysis, architecture, planning — read-only | `profiles/plan.md` |
 | `implement` | Code edits, file creation, refactors | `profiles/implement.md` |
 | `review` | Code audit, PR review, quality checks | `profiles/review.md` |
-| `unsafe` | Explicit high-trust sandbox mode with broad permissions | n/a |
+| `claws-out` | 🦞 Full-access mode (bypass permissions; sandbox/trusted targets only) | n/a |
 
 Default model is **sonnet**. Opus is currently disabled to conserve budget.
 
@@ -49,7 +49,7 @@ JSON parsing, and cost tracking automatically.
 exec scripts/dispatch.sh <profile> <target_dir> "<prompt>"
 ```
 
-- `<profile>` — one of: `plan`, `implement`, `review`, `unsafe`
+- `<profile>` — one of: `plan`, `implement`, `review`, `claws-out` (`unsafe` still accepted as legacy alias)
 - `<target_dir>` — absolute path to the working directory (repo or workspace folder)
 - `<prompt>` — the full task description for Claude CLI
 
@@ -73,14 +73,15 @@ exec scripts/dispatch.sh implement /Users/edgeclaw/.openclaw/workspace \
   "Reorganize the memory/notes/ directory. Consolidate duplicate entries, archive anything older than 30 days into memory/notes/archive/."
 ```
 
-### Unsafe Profile
+### Claws-Out Profile (Full Access)
 
-Use `unsafe` only when you explicitly want broad permissions in an isolated/sandboxed environment and accept the extra risk. It is for "do whatever it takes" runs, not normal use.
+Use `claws-out` when you explicitly want full-access execution (`bypassPermissions`) in a trusted/sandboxed environment and accept the extra risk. It is for "do whatever it takes" runs, not normal use.
 
 Recommended rule:
 - default to `plan`, `review`, or `implement`
-- use `unsafe` only when the target is a throwaway sandbox, isolated VPS, or similarly contained environment
-- do not use `unsafe` for casual reviews, routine edits, or shared production environments
+- use `claws-out` only when the target is a throwaway sandbox, isolated VPS, or similarly contained environment
+- do not use `claws-out` for casual reviews, routine edits, or shared production environments
+- legacy alias `unsafe` is still accepted for compatibility
 
 ### Worktree Isolation
 

@@ -2,7 +2,7 @@
 # claude-foreman dispatch script
 # Usage: dispatch.sh <profile> <target_dir> "<prompt>" [extra_flags...]
 #
-# Profiles: plan, implement, review, unsafe
+# Profiles: plan, implement, review, claws-out (legacy alias: unsafe)
 # Extra flags: --model opus, --worktree, --force, --max-turns N
 
 set -euo pipefail
@@ -71,14 +71,18 @@ case "$PROFILE" in
     MAX_TURNS="${EXTRA_MAX_TURNS:-15}"
     DEFAULT_MODEL="sonnet"
     ;;
-  unsafe)
+  claws-out|unsafe)
+    # keep `unsafe` as a compatibility alias
+    if [[ "$PROFILE" == "unsafe" ]]; then
+      echo "[foreman] NOTE: profile 'unsafe' is deprecated; use 'claws-out'" >&2
+    fi
     PERM_MODE="bypassPermissions"
     ALLOWED_TOOLS=""
     MAX_TURNS="${EXTRA_MAX_TURNS:-20}"
     DEFAULT_MODEL="sonnet"
     ;;
   *)
-    echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review, unsafe)" >&2
+    echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review, claws-out)" >&2
     exit 1
     ;;
 esac
