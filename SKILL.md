@@ -22,7 +22,8 @@ Four execution profiles control what Claude CLI can do:
 | `plan` | Analysis, architecture, planning — read-only | `profiles/plan.md` |
 | `implement` | Code edits, file creation, refactors | `profiles/implement.md` |
 | `review` | Code audit, PR review, quality checks | `profiles/review.md` |
-| `claws-out` | 🦞 Full-access mode (bypass permissions; sandbox/trusted targets only) | n/a |
+| `wide-open` | Root-safe, noninteractive broad-access mode using explicit allowlists instead of bypass | `profiles/wide-open.md` |
+| `claws-out` | 🦞 Full-access mode (bypass permissions; sandbox/trusted targets only, not usable under Linux root) | n/a |
 
 Default model is **sonnet**. Opus is currently disabled to conserve budget.
 
@@ -49,8 +50,8 @@ JSON parsing, and cost tracking automatically.
 exec scripts/dispatch.sh <profile> <target_dir> "<prompt>"
 ```
 
-- `<profile>` — one of: `plan`, `implement`, `review`, `claws-out` (`unsafe` still accepted as legacy alias)
-- `<target_dir>` — absolute path to the working directory (repo or workspace folder)
+- `<profile>` — one of: `plan`, `implement`, `review`, `wide-open`, `claws-out` (`unsafe` still accepted as legacy alias; `root-wide` and `claws-wide` are accepted aliases for `wide-open`)
+- `<target_dir>` — working directory (repo or workspace folder). Absolute paths are preferred; relative paths are resolved against the caller's current directory and echoed back in the dispatch log.
 - `<prompt>` — the full task description for Claude CLI
 
 ### Examples
@@ -71,15 +72,22 @@ exec scripts/dispatch.sh review /Users/edgeclaw/Developer/myapp \
 # Self-edit workspace files
 exec scripts/dispatch.sh implement /Users/edgeclaw/.openclaw/workspace \
   "Reorganize the memory/notes/ directory. Consolidate duplicate entries, archive anything older than 30 days into memory/notes/archive/."
+
+# Root-safe broad mode when you want something claws-out-ish without bypass
+exec scripts/dispatch.sh wide-open /Users/edgeclaw/Developer/myapp \
+  "Inspect the repo, run the needed shell commands, make the code changes, and summarize what changed."
 ```
 
 ### Claws-Out Profile (Full Access)
 
 Use `claws-out` when you explicitly want full-access execution (`bypassPermissions`) in a trusted/sandboxed environment and accept the extra risk. It is for "do whatever it takes" runs, not normal use.
 
+On Linux hosts where the CLI is running as `root`, `claws-out` is blocked by Claude itself. In those environments, use `wide-open` as the nearest root-safe approximation.
+
 Recommended rule:
 - default to `plan`, `review`, or `implement`
-- use `claws-out` only when the target is a throwaway sandbox, isolated VPS, or similarly contained environment
+- use `wide-open` when you need noninteractive broad access on a root-run host
+- use `claws-out` only when the target is a throwaway sandbox, isolated non-root environment, or similarly contained environment
 - do not use `claws-out` for casual reviews, routine edits, or shared production environments
 - legacy alias `unsafe` is still accepted for compatibility
 
