@@ -4,7 +4,7 @@ OpenClaw skill for dispatching heavy-lift coding tasks to Claude CLI while keepi
 
 ## What it includes
 - `SKILL.md` usage + dispatch policy
-- `profiles/` for `plan`, `implement`, `review`, `claws-out` (legacy alias: `unsafe`)
+- `profiles/` for `plan`, `implement`, `review`, `wide-open`, `claws-out` (legacy alias: `unsafe`)
 - `scripts/dispatch.sh` with budget guardrails and structured logging
 - `NOTES.md` for runtime learnings
 
@@ -26,9 +26,10 @@ Profiles:
 - `plan` (read-only analysis)
 - `implement` (code edits/refactors)
 - `review` (audit/review + remote read helpers)
-- `claws-out` (🦞 full-access mode; trusted/sandbox targets only)
+- `wide-open` (root-safe, noninteractive broad-access mode)
+- `claws-out` (🦞 true bypass mode; trusted non-root sandbox targets only)
 
-Compatibility: `unsafe` is still accepted as a legacy alias for `claws-out`.
+Compatibility: `unsafe` is still accepted as a legacy alias for `claws-out`. `root-wide` and `claws-wide` are accepted as aliases for `wide-open`.
 
 ## Notes
 This skill is intended for heavier coding lifts where native tool-call editing would be inefficient.

@@ -2,7 +2,7 @@
 # claude-foreman dispatch script
 # Usage: dispatch.sh <profile> <target_dir> "<prompt>" [extra_flags...]
 #
-# Profiles: plan, implement, review, claws-out (legacy alias: unsafe)
+# Profiles: plan, implement, review, wide-open, claws-out (legacy alias: unsafe)
 # Extra flags: --model opus, --worktree, --force, --max-turns N
 
 set -euo pipefail
@@ -17,6 +17,7 @@ BUDGET_BLOCK=5         # block when remaining < this
 # --- Args ---
 PROFILE="${1:?Usage: dispatch.sh <profile> <target_dir> \"<prompt>\" [flags...]}"
 TARGET_DIR="${2:?Missing target directory}"
+ORIGINAL_TARGET_DIR="$TARGET_DIR"
 PROMPT="${3:?Missing prompt}"
 shift 3
 
@@ -51,6 +52,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --- Normalize target directory early ---
+if [[ ! -d "$TARGET_DIR" ]]; then
+  echo "[foreman] Target directory does not exist: $TARGET_DIR" >&2
+  exit 1
+fi
+
+TARGET_DIR="$(cd "$TARGET_DIR" && pwd -P)"
+
 # --- Profile flags ---
 case "$PROFILE" in
   plan)
@@ -71,6 +80,12 @@ case "$PROFILE" in
     MAX_TURNS="${EXTRA_MAX_TURNS:-15}"
     DEFAULT_MODEL="sonnet"
     ;;
+  wide-open|root-wide|claws-wide)
+    PERM_MODE="dontAsk"
+    ALLOWED_TOOLS="Read,Glob,Grep,Edit,MultiEdit,Write,WebFetch,Bash(*)"
+    MAX_TURNS="${EXTRA_MAX_TURNS:-25}"
+    DEFAULT_MODEL="sonnet"
+    ;;
   claws-out|unsafe)
     # keep `unsafe` as a compatibility alias
     if [[ "$PROFILE" == "unsafe" ]]; then
@@ -82,10 +97,17 @@ case "$PROFILE" in
     DEFAULT_MODEL="sonnet"
     ;;
   *)
-    echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review, claws-out)" >&2
+    echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review, wide-open, claws-out)" >&2
     exit 1
     ;;
 esac
+
+if [[ "$PROFILE" =~ ^(claws-out|unsafe)$ ]] && [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  echo "[foreman] Profile '$PROFILE' is not usable when running as Linux root." >&2
+  echo "[foreman] Claude blocks bypass-style permission modes under root/sudo." >&2
+  echo "[foreman] Use 'wide-open' for the closest root-safe noninteractive mode, or 'implement' for normal coding work." >&2
+  exit 3
+fi
 
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 
@@ -125,7 +147,11 @@ if [[ "$FORCE" != "1" ]]; then
 fi
 
 echo "[foreman] Dispatching: profile=$PROFILE model=$MODEL turns=$MAX_TURNS budget_remaining=\$$REMAINING"
-echo "[foreman] Target: $TARGET_DIR"
+if [[ "$ORIGINAL_TARGET_DIR" != "$TARGET_DIR" ]]; then
+  echo "[foreman] Target: $ORIGINAL_TARGET_DIR -> $TARGET_DIR"
+else
+  echo "[foreman] Target: $TARGET_DIR"
+fi
 echo "[foreman] Prompt: ${PROMPT:0:120}..."
 
 # --- Build command ---
