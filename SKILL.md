@@ -25,7 +25,11 @@ Four execution profiles control what Claude CLI can do:
 | `wide-open` | Root-safe, noninteractive broad-access mode using explicit allowlists instead of bypass | `profiles/wide-open.md` |
 | `claws-out` | 🦞 Full-access mode (bypass permissions; sandbox/trusted targets only, not usable under Linux root) | n/a |
 
-Default model is **sonnet**. Opus is currently disabled to conserve budget.
+`plan` is read-only but has no web-fetch tools. Use `review` for read-only planning
+when the prompt includes public docs/URLs that Claude should fetch; `review` still
+uses plan/read-only permission mode but adds URL retrieval tools.
+
+Default model is **sonnet** for routine dispatches. Use `--model opus` freely when the task benefits from deeper reasoning, broad synthesis, or higher confidence.
 
 ## Dispatch Decision
 
@@ -115,18 +119,37 @@ to this skill directory). Before each dispatch:
 
 If blocked, wait for the window to roll or explicitly override with `--force`.
 
-Opus is currently disabled. Sonnet only.
+Opus is allowed and welcome for work that merits it. Use `--model opus` intentionally for deep planning, thorny debugging, high-stakes reviews, or when the user asks for Opus.
 
 ## Post-Execution
 
 After every dispatch, check the result:
 
 1. **`stop_reason: end_turn`** — task completed normally. Review output.
-2. **`stop_reason: max_turns`** — task hit the turn limit. May be incomplete.
+2. **`stop_reason: tool_use` with empty result** — Claude stopped while trying
+   to use a tool before writing the requested summary. Treat this as incomplete:
+   inspect any saved artifact paths printed by `dispatch.sh`, then re-dispatch
+   with more turns and an explicit instruction such as: "End with a written
+   summary even if you must stop inspecting files."
+3. **`stop_reason: max_turns`** — task hit the turn limit. May be incomplete.
    Decide whether to continue (re-dispatch with context) or accept partial work.
-3. **Parse `result`** — this is Claude CLI's final text output. Use it to
+4. **Parse `result`** — this is Claude CLI's final text output. Use it to
    summarize what was done back to the user or to your own logs.
-4. **For worktree runs** — check the diff in the worktree branch before merging.
+5. **For worktree runs** — check the diff in the worktree branch before merging.
+
+## Prompt Crafting Tips
+
+For planning/review runs that may inspect many files or docs, include a final-output
+guardrail in the prompt:
+
+```text
+Before using the last available turn, stop inspecting and return a written summary
+with recommendations, blockers, and next steps.
+```
+
+When the user gives public documentation URLs, prefer `review` over `plan` so
+Claude can fetch those URLs. When local docs are enough, `plan` is cheaper and
+more constrained.
 
 ## Codex Fallback (Optional)
 
