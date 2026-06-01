@@ -1,7 +1,8 @@
 ---
 name: claude-foreman
 description: >
-  Dispatch heavy-lift tasks to Claude CLI for isolated execution. Use when:
+  Dispatch bounded planning, review, and implementation jobs to Claude CLI for
+  isolated execution while the main agent remains orchestrator. Use when:
   editing large files (>50 lines changed), multi-file refactors, codebase
   exploration + implementation, restructuring workspace files, deep code
   reviews, or any task that would require more than 3-4 sequential tool calls.
@@ -10,12 +11,27 @@ description: >
 
 # Claude Foreman
 
-Delegate heavy work to Claude CLI. You orchestrate (decide what, when, why).
-Claude CLI executes (does the work in isolation).
+Delegate bounded work packets to Claude CLI while the main agent keeps ownership
+of the conversation, memory, project state, and user intent. You orchestrate:
+decide what to delegate, choose a permission profile, review the result, and
+report back. Claude CLI executes the packet in isolation.
+
+Claude Foreman is not a replacement model route. It is a repeatable dispatch
+harness around Claude CLI and ACPX (OpenClaw's agent-to-agent CLI bridge):
+permission profiles, cost logging, git-safe review flow, and final-summary
+discipline.
+
+Use it when separation is valuable:
+
+- A second opinion or review pass should not pollute the main context.
+- A large inspection/edit would distract or compact the orchestrator.
+- Claude Opus is preferred for final edits, readability, or deeper judgment.
+- The main agent should stay responsive while a heavier slice runs off-thread.
+- You want a clean work packet with known permissions and auditable output.
 
 ## Profiles
 
-Four execution profiles control what Claude CLI can do:
+Five execution profiles control what Claude CLI can do:
 
 | Profile | Use For | Reference |
 |---|---|---|
@@ -29,16 +45,20 @@ Four execution profiles control what Claude CLI can do:
 when the prompt includes public docs/URLs that Claude should fetch; `review` still
 uses plan/read-only permission mode but adds URL retrieval tools.
 
-Default model is **sonnet** for routine dispatches. Use `--model opus` freely when the task benefits from deeper reasoning, broad synthesis, or higher confidence.
+**Default model: opus across all profiles.** Use `--model sonnet` only as an
+explicit lighter-cost escape hatch for routine or low-risk dispatches.
 
 ## Dispatch Decision
 
-**Use Claude CLI when:**
+**Use Claude Foreman when:**
 - Estimated change is >50 lines or spans multiple files
 - Task requires codebase exploration before acting
 - Self-editing workspace files (restructuring memory, rewriting configs)
 - Any operation you estimate would take >3-4 tool calls natively
 - Deep code reviews or architecture analysis
+- You want Claude's opinion without handing Claude the whole conversation
+- You want implementation separated from orchestration so the main agent can
+  keep project/user context intact
 
 **Keep native when:**
 - One-line fixes, small config tweaks
@@ -119,7 +139,9 @@ to this skill directory). Before each dispatch:
 
 If blocked, wait for the window to roll or explicitly override with `--force`.
 
-Opus is allowed and welcome for work that merits it. Use `--model opus` intentionally for deep planning, thorny debugging, high-stakes reviews, or when the user asks for Opus.
+Opus is the default because Foreman is mainly for work where stronger judgment,
+review quality, or readability matters. Use `--model sonnet` intentionally for
+lighter tasks when cost/speed matters more than depth.
 
 ## Post-Execution
 
@@ -183,8 +205,8 @@ Add a section to your workspace `SOUL.md`:
 ```markdown
 ## Heavy Lifting — Non-Negotiable
 
-For any task involving >20 lines of changes, multiple file edits, deep
-codebase exploration, or >2 sequential tool calls: **dispatch to Claude CLI**
+For any task involving >50 lines of changes, multiple file edits, deep
+codebase exploration, or >3-4 sequential tool calls: **dispatch to Claude CLI**
 via the `claude-foreman` skill. No exceptions. I orchestrate, Claude CLI
 executes. Read `skills/claude-foreman/SKILL.md` for profiles and usage.
 This applies to coding tasks, workspace self-edits, and anything that would
@@ -208,7 +230,7 @@ prompt by the gateway, so it survives context compaction.
     "telegram": {
       "groups": {
         "*": {
-          "systemPrompt": "STANDING RULE — Claude Foreman: For any task involving >20 lines of changes, multiple file edits, deep codebase exploration, or >2 sequential tool calls, you MUST dispatch to Claude CLI via the claude-foreman skill (skills/claude-foreman/SKILL.md) instead of doing the work natively. You orchestrate, Claude CLI executes. No exceptions."
+          "systemPrompt": "STANDING RULE — Claude Foreman: For any task involving >50 lines of changes, multiple file edits, deep codebase exploration, or >3-4 sequential tool calls, you MUST dispatch to Claude CLI via the claude-foreman skill (skills/claude-foreman/SKILL.md) instead of doing the work natively. You orchestrate, Claude CLI executes. No exceptions."
         }
       }
     }
@@ -244,7 +266,7 @@ Add a "Do X, not Y" entry to `memory/lessons/lessons.md`:
 ## Use Claude Foreman for Heavy Lifts
 
 ### Don't try to do large edits natively — dispatch to Claude CLI
-**Do:** Use the claude-foreman skill for any task >20 lines or >2 tool calls.
+**Do:** Use the claude-foreman skill for any task >50 lines, multiple files, or >3-4 sequential tool calls.
 **Don't:** Attempt large refactors or multi-file edits through native tool calls.
 ```
 
@@ -254,7 +276,7 @@ Add a one-liner to the Hot Items section:
 
 ```markdown
 - **Claude Foreman skill (2026-04-04):** ✅ Installed. USE IT for anything
-  >20 lines or >2 tool calls. See AGENTS.md and skills/claude-foreman/.
+  >50 lines, multiple files, or >3-4 sequential tool calls. See AGENTS.md and skills/claude-foreman/.
 ```
 
 ### Summary

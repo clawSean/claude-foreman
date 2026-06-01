@@ -3,7 +3,7 @@
 # Usage: dispatch.sh <profile> <target_dir> "<prompt>" [extra_flags...]
 #
 # Profiles: plan, implement, review, wide-open, claws-out (legacy alias: unsafe)
-# Extra flags: --model opus, --worktree, --force, --max-turns N
+# Extra flags: --model sonnet, --worktree, --force, --max-turns N
 
 set -euo pipefail
 
@@ -66,25 +66,25 @@ case "$PROFILE" in
     PERM_MODE="plan"
     ALLOWED_TOOLS="Read,Glob,Grep,Bash(git:*)"
     MAX_TURNS="${EXTRA_MAX_TURNS:-15}"
-    DEFAULT_MODEL="sonnet"
+    DEFAULT_MODEL="opus"
     ;;
   implement)
     PERM_MODE="acceptEdits"
     ALLOWED_TOOLS="Read,Glob,Grep,Edit,Write,Bash(git:*,npm:*,npx:*,node:*,python:*,python3:*,pip:*,cargo:*,go:*,make:*,yarn:*,pnpm:*,bun:*,deno:*,pytest:*,jest:*,tsc:*,eslint:*,prettier:*)"
     MAX_TURNS="${EXTRA_MAX_TURNS:-30}"
-    DEFAULT_MODEL="sonnet"
+    DEFAULT_MODEL="opus"
     ;;
   review)
     PERM_MODE="plan"
     ALLOWED_TOOLS="Read,Glob,Grep,WebFetch,Bash(git:*),Bash(curl:*),Bash(wget:*)"
     MAX_TURNS="${EXTRA_MAX_TURNS:-15}"
-    DEFAULT_MODEL="sonnet"
+    DEFAULT_MODEL="opus"
     ;;
   wide-open|root-wide|claws-wide)
     PERM_MODE="dontAsk"
     ALLOWED_TOOLS="Read,Glob,Grep,Edit,MultiEdit,Write,WebFetch,Bash(*)"
     MAX_TURNS="${EXTRA_MAX_TURNS:-25}"
-    DEFAULT_MODEL="sonnet"
+    DEFAULT_MODEL="opus"
     ;;
   claws-out|unsafe)
     # keep `unsafe` as a compatibility alias
@@ -94,7 +94,7 @@ case "$PROFILE" in
     PERM_MODE="bypassPermissions"
     ALLOWED_TOOLS=""
     MAX_TURNS="${EXTRA_MAX_TURNS:-20}"
-    DEFAULT_MODEL="sonnet"
+    DEFAULT_MODEL="opus"
     ;;
   *)
     echo "[foreman] Unknown profile: $PROFILE (use: plan, implement, review, wide-open, claws-out)" >&2

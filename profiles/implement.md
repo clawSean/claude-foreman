@@ -9,7 +9,7 @@ and run common dev commands.
 --permission-mode acceptEdits
 --allowedTools "Read,Glob,Grep,Edit,Write,Bash(git:*,npm:*,npx:*,node:*,python:*,python3:*,pip:*,cargo:*,go:*,make:*,yarn:*,pnpm:*,bun:*,deno:*,pytest:*,jest:*,tsc:*,eslint:*,prettier:*)"
 --max-turns 30
---model sonnet
+--model opus
 --output-format json
 --no-session-persistence
 ```

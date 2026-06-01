@@ -9,7 +9,7 @@ modify any files.
 --permission-mode plan
 --allowedTools "Read,Glob,Grep,Bash(git:*)"
 --max-turns 15
---model sonnet
+--model opus
 --output-format json
 --no-session-persistence
 ```

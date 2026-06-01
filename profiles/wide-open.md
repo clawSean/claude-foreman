@@ -8,7 +8,7 @@ Root-safe, noninteractive broad-access mode. This is the closest approximation t
 --permission-mode dontAsk
 --allowedTools "Read,Glob,Grep,Edit,MultiEdit,Write,WebFetch,Bash(*)"
 --max-turns 25
---model sonnet
+--model opus
 --output-format json
 --no-session-persistence
 ```
