@@ -1,18 +1,25 @@
 # Profile: review
 
-Read-only code audit and review. Same tool access as `plan` but the prompt
-framing targets quality assessment rather than planning.
+Read-only code audit and review. Same permission mode as `plan` but adds URL
+retrieval tools and the prompt framing targets quality assessment.
 
 ## CLI Flags
 
 ```
 --permission-mode plan
---allowedTools "Read,Glob,Grep,Bash(git:*)"
+--allowedTools "Read,Glob,Grep,WebFetch,Bash(git:*),Bash(curl:*),Bash(wget:*),Bash(ls:*),Bash(cat:*),Bash(wc:*),Bash(head:*),Bash(tail:*),Bash(env:*),Bash(pwd:*),Bash(date:*),Bash(find:*),Bash(echo:*)"
 --max-turns 15
 --model opus
---output-format json
+--output-format stream-json
+--verbose
 --no-session-persistence
 ```
+
+Note: each `Bash(cmd:*)` is a separate allowlist entry. The combined
+`Bash(a:*,b:*)` form is not valid syntax.
+
+A final-output guardrail is automatically appended to every prompt so the run
+ends with a written summary rather than a dangling tool call.
 
 ## When to Use
 
@@ -20,6 +27,7 @@ framing targets quality assessment rather than planning.
 - Security audit of a module or feature
 - Performance review of hot paths
 - Pre-merge review of a worktree branch created by `implement`
+- Any read-only planning that involves public docs/URLs Claude should fetch
 
 ## Prompt Tips
 
