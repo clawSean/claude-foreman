@@ -224,7 +224,7 @@ fi
 # --- Execute ---
 TMPMETA=$(mktemp)
 TMPERR=$(mktemp)
-trap "rm -f '$TMPMETA' '$TMPERR'" EXIT
+trap 'rm -f "$TMPMETA" "$TMPERR"' EXIT
 
 cd "$TARGET_DIR"
 
@@ -600,4 +600,4 @@ fi
 echo ""
 echo "$RESULT_TEXT"
 
-exit $EXIT_CODE
+exit "$EXIT_CODE"
