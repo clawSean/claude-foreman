@@ -65,10 +65,35 @@ explicit lighter-cost escape hatch for routine or low-risk dispatches.
 - Quick file reads or lookups
 - Simple Q&A that doesn't need tool access
 
+## Optional: As a Ralph Executor
+
+Claude Foreman can execute a single heavy slice inside a Ralph Wiggum loop.
+
+- Ralph owns iteration, state, verification, and what counts as done.
+- Foreman executes the selected slice with the narrowest useful profile.
+- Offer this pairing when the user asks for Ralph/Foreman and the task fits
+  small-loop iteration but one slice is too large for inline work.
+- Return compact evidence back to the Ralph loop: files changed, diff summary,
+  checks run, pass/fail, and blockers.
+- Do not let Foreman silently expand into an open-ended loop. If more iteration
+  is needed, hand control back to Ralph.
+
 ## How to Dispatch
 
 Use `scripts/dispatch.sh` for all invocations. It handles flag routing,
 JSON parsing, and cost tracking automatically.
+
+**OpenClaw exec timeout rule:** Foreman runs often outlive short wrapper timeouts.
+Do not use tiny `timeout` values like 120s for Foreman dispatches. Prefer
+`yieldMs: 1000` so the process backgrounds quickly, then poll with
+`process.poll`. For `exec.timeout`, use a generous but bounded ceiling by
+default: `plan` 900s, `implement`/`review` 1800s. Use 3600s only when the prompt
+explicitly involves large-codebase exploration plus edits, test/build loops,
+dependency installs, or multi-repo/multi-phase work. Do not use 3600s for
+ordinary doc edits or small patches. If the scope is unknown, first dispatch
+`plan` with 900s to size the work, then run `implement` only after the plan is
+clear. If a run exits with `SIGKILL` and no Claude result, suspect wrapper
+timeout first.
 
 ```bash
 exec scripts/dispatch.sh <profile> <target_dir> "<prompt>"
@@ -155,19 +180,29 @@ After every dispatch, check the result:
    summary even if you must stop inspecting files."
 3. **`stop_reason: max_turns`** — task hit the turn limit. May be incomplete.
    Decide whether to continue (re-dispatch with context) or accept partial work.
-4. **Parse `result`** — this is Claude CLI's final text output. Use it to
+4. **Permission denials** — if Claude tried a command outside the allowlist,
+   `dispatch.sh` prints the denial count and the first five denied tool/command
+   inputs. Check whether the profile needs broadening or the prompt needs
+   scoping. Artifacts are saved to `artifacts/` automatically.
+5. **Parse `result`** — this is Claude CLI's final text output. Use it to
    summarize what was done back to the user or to your own logs.
-5. **For worktree runs** — check the diff in the worktree branch before merging.
+6. **For worktree runs** — check the diff in the worktree branch before merging.
+
+`dispatch.sh` saves raw stdout/stderr artifacts under `artifacts/` for any run
+that ends with `max_turns`, `error`, an incomplete `tool_use`, or any permission
+denials. The artifact filename encodes the timestamp, profile, and reason.
+`cost-log.json` entries include `permission_denial_count` for auditing.
+Each run also writes the raw Claude `stream-json` event log to
+`artifacts/streams/` and prints the path in the dispatch banner. Use that file's
+mtime or tail for liveness/audit checks; Foreman emits only compact filtered
+progress lines to the parent process.
 
 ## Prompt Crafting Tips
 
-For planning/review runs that may inspect many files or docs, include a final-output
-guardrail in the prompt:
-
-```text
-Before using the last available turn, stop inspecting and return a written summary
-with recommendations, blockers, and next steps.
-```
+`dispatch.sh` automatically appends a final-output guardrail to every constrained
+profile prompt (plan, implement, review, wide-open). The guardrail instructs
+Claude to stop tool use before the last turn and write a complete written summary.
+You do not need to add this manually. `claws-out` is exempt.
 
 When the user gives public documentation URLs, prefer `review` over `plan` so
 Claude can fetch those URLs. When local docs are enough, `plan` is cheaper and

@@ -23,7 +23,7 @@ This is not a replacement model route. It is a repeatable dispatch harness: perm
 ## What it includes
 - `SKILL.md` usage + dispatch policy
 - `profiles/` for `plan`, `implement`, `review`, `wide-open`, `claws-out` (legacy alias: `unsafe`)
-- `scripts/dispatch.sh` with budget guardrails and structured logging
+- `scripts/dispatch.sh` with budget guardrails, structured logging, permission-denial diagnostics, and auto-appended final-output guardrail
 - `NOTES.md` for runtime learnings
 
 ## Quickstart
@@ -33,7 +33,14 @@ scripts/dispatch.sh review /path/to/repo \
   "Review the current diff. Focus on correctness, risk, and missing tests."
 ```
 
-Expected result: Foreman prints the selected profile/model, runs Claude CLI, logs cost/turn metadata, and returns Claude's final summary. For write-profile runs, review the git diff before merging or copying changes forward.
+Expected result: Foreman prints the selected profile/model, the raw stream path,
+compact live progress lines, cost/turn metadata, and Claude's final summary. For
+write-profile runs, review the git diff before merging or copying changes
+forward.
+
+Raw Claude `stream-json` events are saved under `artifacts/streams/` for
+auditing and liveness checks. Foreman only prints compact filtered progress to
+the parent process; it does not dump raw JSON into chat/context.
 
 ## Install
 Copy this folder into your OpenClaw workspace:

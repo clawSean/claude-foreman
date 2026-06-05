@@ -9,7 +9,8 @@ Root-safe, noninteractive broad-access mode. This is the closest approximation t
 --allowedTools "Read,Glob,Grep,Edit,MultiEdit,Write,WebFetch,Bash(*)"
 --max-turns 25
 --model opus
---output-format json
+--output-format stream-json
+--verbose
 --no-session-persistence
 ```
 
