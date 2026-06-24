@@ -3,11 +3,35 @@
 # Usage: dispatch.sh <profile> <target_dir> "<prompt>" [extra_flags...]
 #
 # Profiles: plan, implement, review, wide-open, claws-out (legacy alias: unsafe)
-# Extra flags: --model sonnet, --worktree, --force, --max-turns N
+# Extra flags: --model sonnet, --effort max, --worktree, --force, --max-turns N,
+#              --provider claude-cli|claude-work, --profile <name>
 
 set -euo pipefail
 
-SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# --- Pre-flight: required binaries must be on PATH ---
+# Checked up front so a missing dependency produces an obvious error instead of
+# failing deep inside the dispatch pipeline (where the real cause gets masked by
+# an empty stream / "no result event" diagnostic).
+for _bin in claude python3; do
+  if ! command -v "$_bin" >/dev/null 2>&1; then
+    echo "[foreman] Required command not found in PATH: $_bin" >&2
+    echo "[foreman] Install it or fix PATH before dispatching." >&2
+    exit 1
+  fi
+done
+
+# --- Resolve script location through symlinks ---
+# dirname "$0" alone breaks when dispatch.sh is invoked via a symlink: the cost
+# log, artifacts, and stream dirs would resolve relative to the link's location
+# instead of the real skill dir. Resolve the canonical path first.
+SCRIPT_SRC="$0"
+if command -v readlink >/dev/null 2>&1; then
+  SCRIPT_SRC="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+elif command -v realpath >/dev/null 2>&1; then
+  SCRIPT_SRC="$(realpath "$0" 2>/dev/null || echo "$0")"
+fi
+
+SKILL_DIR="$(cd "$(dirname "$SCRIPT_SRC")/.." && pwd)"
 COST_LOG="$SKILL_DIR/cost-log.json"
 ARTIFACT_DIR="$SKILL_DIR/artifacts"
 STREAM_DIR="$ARTIFACT_DIR/streams"
@@ -26,14 +50,22 @@ shift 3
 
 # --- Parse extra flags ---
 MODEL=""
+EFFORT=""
 WORKTREE=""
 FORCE=""
 EXTRA_MAX_TURNS=""
+PROVIDER=""
+AUTH_PROFILE=""
+LANE_REQUESTED=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model)
       MODEL="$2"
+      shift 2
+      ;;
+    --effort)
+      EFFORT="$2"
       shift 2
       ;;
     --worktree)
@@ -46,6 +78,16 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-turns)
       EXTRA_MAX_TURNS="$2"
+      shift 2
+      ;;
+    --provider)
+      PROVIDER="$2"
+      LANE_REQUESTED=1
+      shift 2
+      ;;
+    --profile)
+      AUTH_PROFILE="$2"
+      LANE_REQUESTED=1
       shift 2
       ;;
     *)
@@ -62,6 +104,22 @@ if [[ ! -d "$TARGET_DIR" ]]; then
 fi
 
 TARGET_DIR="$(cd "$TARGET_DIR" && pwd -P)"
+
+# --- Pre-flight: --worktree requires a git work tree ---
+# Without this check, passing --worktree against a non-git directory fails deep
+# in the Claude CLI and the error gets wrapped in the stream-artifact diagnostic
+# instead of a clear up-front message.
+if [[ -n "$WORKTREE" ]]; then
+  if ! command -v git >/dev/null 2>&1; then
+    echo "[foreman] --worktree requires git, which is not on PATH." >&2
+    exit 1
+  fi
+  if ! git -C "$TARGET_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "[foreman] --worktree requested but target is not a git work tree: $TARGET_DIR" >&2
+    echo "[foreman] Run inside a git repo, or drop --worktree." >&2
+    exit 1
+  fi
+fi
 
 # Appended to prompts for all constrained profiles to prevent runs that end on
 # a tool call with no written summary.
@@ -142,6 +200,93 @@ fi
 
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 
+# --- Provider / auth-lane selection (optional) ---
+# dispatch.sh shells out to the `claude` binary, which authenticates via the
+# CLAUDE_CODE_OAUTH_TOKEN env var. With no provider/profile flag we preserve
+# normal Foreman behavior and inherit whatever Claude auth the caller already
+# has. When a profile is requested, resolve it through claude-profiles.json:
+# profile name -> env var name -> token value from the environment. The active
+# state file is only used as the default profile when the caller requests the
+# claude-cli lane without naming a profile.
+CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-/root/.openclaw/claude-profiles.json}}"
+CLAUDE_PROFILE_STATE="${FOREMAN_CLAUDE_PROFILE_STATE:-${CLAUDE_AUTH_ACTIVE_FILE:-/root/.openclaw/claude-auth-active}}"
+LANE_DESC="inherited (ambient claude auth)"
+
+if [[ -n "$LANE_REQUESTED" ]]; then
+  case "$PROVIDER" in
+    claude-work)
+      AUTH_PROFILE="${AUTH_PROFILE:-work}"
+      ;;
+    claude-cli|"")
+      if [[ -z "$AUTH_PROFILE" ]]; then
+        AUTH_PROFILE="$(cat "$CLAUDE_PROFILE_STATE" 2>/dev/null || true)"
+        AUTH_PROFILE="${AUTH_PROFILE//[$'\t\r\n ']}"
+      fi
+      if [[ -z "$AUTH_PROFILE" ]]; then
+        AUTH_PROFILE="$(python3 -c '
+import json, sys
+try:
+    print((json.load(open(sys.argv[1])).get("active") or "").strip())
+except Exception:
+    print("")
+' "$CLAUDE_PROFILES_FILE")"
+      fi
+      ;;
+    *)
+      echo "[foreman] Unknown provider: $PROVIDER (use: claude-cli, claude-work)" >&2
+      exit 1
+      ;;
+  esac
+  if [[ -z "$AUTH_PROFILE" ]]; then
+    echo "[foreman] No Claude auth profile selected. Pass --profile <name> or set active in $CLAUDE_PROFILE_STATE / $CLAUDE_PROFILES_FILE." >&2
+    exit 1
+  fi
+  if [[ ! -f "$CLAUDE_PROFILES_FILE" ]]; then
+    echo "[foreman] Claude profiles file not found: $CLAUDE_PROFILES_FILE" >&2
+    echo "[foreman] Either omit --profile/--provider to inherit ambient auth, or create a profiles JSON file." >&2
+    exit 1
+  fi
+  PROFILE_META=$(python3 -c '
+import json, sys
+profiles_file, profile = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(profiles_file))
+except Exception as exc:
+    print(f"ERROR\x1fCannot read {profiles_file}: {exc}")
+    sys.exit(0)
+profiles = data.get("profiles") or {}
+entry = profiles.get(profile)
+if not isinstance(entry, dict):
+    print("ERROR\x1fUnknown Claude profile: " + profile)
+    sys.exit(0)
+env_var = str(entry.get("env_var") or "").strip()
+label = str(entry.get("label") or profile).strip()
+if not env_var:
+    print("ERROR\x1fClaude profile has no env_var: " + profile)
+else:
+    print(env_var + "\x1f" + label)
+' "$CLAUDE_PROFILES_FILE" "$AUTH_PROFILE")
+  IFS=$'\x1f' read -r LANE_ENV_VAR LANE_LABEL <<< "$PROFILE_META"
+  if [[ "$LANE_ENV_VAR" == "ERROR" ]]; then
+    echo "[foreman] $LANE_LABEL" >&2
+    echo "[foreman] Profiles file: $CLAUDE_PROFILES_FILE" >&2
+    exit 1
+  fi
+  if [[ ! "$LANE_ENV_VAR" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "[foreman] Claude profile '$AUTH_PROFILE' uses invalid env_var '$LANE_ENV_VAR'." >&2
+    echo "[foreman] Env var names must match [A-Za-z_][A-Za-z0-9_]*." >&2
+    exit 1
+  fi
+  LANE_TOKEN="${!LANE_ENV_VAR:-}"
+  if [[ -z "$LANE_TOKEN" ]]; then
+    echo "[foreman] Requested auth lane (provider='${PROVIDER:-claude-cli}' profile='$AUTH_PROFILE') but its token env var is empty." >&2
+    echo "[foreman] Expected a token in \$$LANE_ENV_VAR, from $CLAUDE_PROFILES_FILE." >&2
+    exit 1
+  fi
+  export CLAUDE_CODE_OAUTH_TOKEN="$LANE_TOKEN"
+  LANE_DESC="${PROVIDER:-claude-cli} ($AUTH_PROFILE; env \$$LANE_ENV_VAR)"
+fi
+
 # Append guardrail to constrained profiles so runs end with a written summary.
 if [[ "$ADD_GUARDRAIL" == "1" ]]; then
   FINAL_PROMPT="${PROMPT}${GUARDRAIL}"
@@ -185,6 +330,10 @@ if [[ "$FORCE" != "1" ]]; then
 fi
 
 echo "[foreman] Dispatching: profile=$PROFILE model=$MODEL turns=$MAX_TURNS budget_remaining=\$$REMAINING"
+echo "[foreman] Auth lane: $LANE_DESC"
+if [[ -n "$EFFORT" ]]; then
+  echo "[foreman] Effort: $EFFORT"
+fi
 if [[ "$ORIGINAL_TARGET_DIR" != "$TARGET_DIR" ]]; then
   echo "[foreman] Target: $ORIGINAL_TARGET_DIR -> $TARGET_DIR"
 else
@@ -194,8 +343,10 @@ echo "[foreman] Prompt: ${PROMPT:0:120}..."
 
 # --- Stream file (raw JSONL, per run) for auditability + liveness ---
 mkdir -p "$STREAM_DIR"
+# Include the PID so two dispatches started in the same second (scripted
+# fan-out) can't overwrite each other's stream file.
 STREAM_TS=$(date +%Y%m%d-%H%M%S)
-STREAM_FILE="$STREAM_DIR/${STREAM_TS}-${PROFILE}.jsonl"
+STREAM_FILE="$STREAM_DIR/${STREAM_TS}-$$-${PROFILE}.jsonl"
 echo "[foreman] Stream: $STREAM_FILE"
 
 # --- Build command ---
@@ -212,6 +363,10 @@ CMD=(
   --verbose
   --no-session-persistence
 )
+
+if [[ -n "$EFFORT" ]]; then
+  CMD+=(--effort "$EFFORT")
+fi
 
 if [[ -n "$ALLOWED_TOOLS" ]]; then
   CMD+=(--allowedTools "$ALLOWED_TOOLS")
@@ -378,7 +533,35 @@ json.dump(out, open(meta_path, "w"))
 ' "$STREAM_FILE" "$TMPMETA"
 
 # --- Parse normalized metadata ---
-FOUND_RESULT=$(python3 -c "import json;print('1' if json.load(open('$TMPMETA')).get('found_result') else '0')" 2>/dev/null || echo "0")
+# Read all single-line scalar fields in ONE python3 invocation, joined by the
+# ASCII Unit Separator (0x1f). A non-whitespace delimiter is required so empty
+# fields (e.g. a blank session_id) are preserved by `read` rather than collapsed.
+# RESULT_TEXT is parsed in its own call below because it can span multiple lines.
+META_SCALARS=$(python3 -c "
+import json
+sep = chr(31)
+try:
+    d = json.load(open('$TMPMETA'))
+except Exception:
+    d = {}
+fields = [
+    '1' if d.get('found_result') else '0',
+    str(d.get('total_cost_usd', 0)),
+    str(d.get('num_turns', 0)),
+    str(d.get('stop_reason', 'unknown') or 'unknown'),
+    str(d.get('session_id', '') or ''),
+    str(len(d.get('permission_denials', []) or [])),
+]
+print(sep.join(fields))
+" 2>/dev/null || printf '0\x1f0\x1f0\x1funknown\x1f\x1f0')
+
+IFS=$'\x1f' read -r FOUND_RESULT COST NUM_TURNS STOP_REASON SESSION_ID PERM_DENIALS <<< "$META_SCALARS"
+# Defensive defaults in case of a truncated/short read.
+FOUND_RESULT="${FOUND_RESULT:-0}"
+COST="${COST:-0}"
+NUM_TURNS="${NUM_TURNS:-0}"
+STOP_REASON="${STOP_REASON:-unknown}"
+PERM_DENIALS="${PERM_DENIALS:-0}"
 
 RESULT_TEXT=$(python3 -c "
 import json
@@ -388,46 +571,6 @@ try:
 except:
     print('')
 " 2>/dev/null || echo "")
-
-COST=$(python3 -c "
-import json
-try:
-    print(json.load(open('$TMPMETA')).get('total_cost_usd', 0))
-except:
-    print(0)
-" 2>/dev/null || echo "0")
-
-NUM_TURNS=$(python3 -c "
-import json
-try:
-    print(json.load(open('$TMPMETA')).get('num_turns', 0))
-except:
-    print(0)
-" 2>/dev/null || echo "0")
-
-STOP_REASON=$(python3 -c "
-import json
-try:
-    print(json.load(open('$TMPMETA')).get('stop_reason', 'unknown'))
-except:
-    print('unknown')
-" 2>/dev/null || echo "unknown")
-
-SESSION_ID=$(python3 -c "
-import json
-try:
-    print(json.load(open('$TMPMETA')).get('session_id', ''))
-except:
-    print('')
-" 2>/dev/null || echo "")
-
-PERM_DENIALS=$(python3 -c "
-import json
-try:
-    print(len(json.load(open('$TMPMETA')).get('permission_denials', [])))
-except:
-    print(0)
-" 2>/dev/null || echo "0")
 
 if [[ "$FOUND_RESULT" != "1" ]]; then
   if [[ -z "${RESULT_TEXT//[[:space:]]/}" ]]; then
@@ -442,6 +585,11 @@ fi
 # triple quotes, or backslashes can never break the script. Wrapped in `|| true`
 # so a cost-log write failure can never abort the dispatch under `set -e`.
 TASK_SUMMARY="${PROMPT:0:80}"
+# Serialize the cost-log read-modify-write across concurrent dispatches with an
+# advisory lock so simultaneous writes can't lose each other's update. flock is
+# best-effort: if it isn't installed the write still proceeds without the guard.
+(
+flock -w 10 9 2>/dev/null || true
 FOREMAN_COST_LOG="$COST_LOG" \
 FOREMAN_PROFILE="$PROFILE" \
 FOREMAN_MODEL="$MODEL" \
@@ -484,8 +632,13 @@ entries.append({
 })
 # Keep last 200 entries to prevent unbounded growth
 entries = entries[-200:]
-json.dump(entries, open(log_path, "w"), indent=2)
-' || echo "[foreman] WARNING: cost-log write failed (continuing)." >&2
+# Atomic write: dump to a temp file then os.replace so any concurrent reader
+# always sees a complete cost log (old or new), never a half-written file.
+tmp_path = log_path + ".tmp"
+json.dump(entries, open(tmp_path, "w"), indent=2)
+os.replace(tmp_path, log_path)
+'
+) 9>"$COST_LOG.lock" || echo "[foreman] WARNING: cost-log write failed (continuing)." >&2
 
 # --- Report ---
 NEW_SPENT=$(python3 -c "print(f'{$SPENT + $COST:.4f}')")
@@ -554,8 +707,8 @@ fi
 if [[ "$SAVE_ARTIFACT" == "1" ]]; then
   mkdir -p "$ARTIFACT_DIR"
   TS=$(date +%Y%m%d-%H%M%S)
-  OUT_ARTIFACT="$ARTIFACT_DIR/incomplete-${TS}-${PROFILE}-${ARTIFACT_REASON}.jsonl"
-  ERR_ARTIFACT="$ARTIFACT_DIR/incomplete-${TS}-${PROFILE}-${ARTIFACT_REASON}.stderr"
+  OUT_ARTIFACT="$ARTIFACT_DIR/incomplete-${TS}-$$-${PROFILE}-${ARTIFACT_REASON}.jsonl"
+  ERR_ARTIFACT="$ARTIFACT_DIR/incomplete-${TS}-$$-${PROFILE}-${ARTIFACT_REASON}.stderr"
   cp "$STREAM_FILE" "$OUT_ARTIFACT" 2>/dev/null || true
   cp "$TMPERR" "$ERR_ARTIFACT" 2>/dev/null || true
   echo "[foreman] Artifacts saved: $OUT_ARTIFACT" >&2
@@ -596,8 +749,29 @@ if [[ -s "$TMPERR" ]]; then
   cat "$TMPERR" >&2
 fi
 
+# --- Determine final exit code ---
+# Trust the Claude CLI's own exit code as the primary failure signal. A non-zero
+# exit can accompany a `result` event whose text merely *contains* an error
+# (e.g. an invalid/unavailable model: the CLI exits 1 but still emits a
+# subtype=success result holding the error message). So "a result event exists"
+# is NOT a reliable success signal, and we must never flip a CLI failure to 0.
+# We only override in the SAFE direction: when the CLI reports success (exit 0)
+# but produced no usable result event, surface that as a failure so callers
+# don't mistake a silent no-result run for success.
+if [[ "$EXIT_CODE" -ne 0 ]]; then
+  FINAL_EXIT="$EXIT_CODE"
+elif [[ "$FOUND_RESULT" != "1" ]]; then
+  FINAL_EXIT=1
+else
+  FINAL_EXIT=0
+fi
+
+if [[ "$FINAL_EXIT" != "$EXIT_CODE" ]]; then
+  echo "[foreman] Note: claude CLI exit code was $EXIT_CODE; reporting $FINAL_EXIT based on result presence." >&2
+fi
+
 # --- Output result ---
 echo ""
 echo "$RESULT_TEXT"
 
-exit "$EXIT_CODE"
+exit "$FINAL_EXIT"

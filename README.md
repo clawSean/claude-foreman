@@ -67,5 +67,101 @@ Default model is **Opus** across profiles. Use `--model sonnet` as an explicit l
 
 Compatibility: `unsafe` is still accepted as a legacy alias for `claws-out`. `root-wide` and `claws-wide` are accepted as aliases for `wide-open`.
 
+## Optional Claude Account Profiles
+
+Foreman normally inherits the caller's ambient Claude CLI auth. That keeps the
+standalone skill portable: users who only have one `claude` login can keep using
+the normal dispatch command with no profile setup.
+
+On machines with multiple Claude setup-token accounts, Foreman can pin an auth
+profile for a run:
+
+```bash
+scripts/dispatch.sh plan /path/to/repo \
+  "Reply exactly: FOREMAN_PROFILE_OK" \
+  --model sonnet \
+  --profile work
+```
+
+When `--profile <name>` or `--provider claude-cli|claude-work` is supplied,
+Foreman resolves auth through a profiles JSON file:
+
+```json
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "JPop Personal",
+      "env_var": "ANTHROPIC_OAUTH_TOKEN1"
+    },
+    "work": {
+      "label": "Edge Company",
+      "env_var": "ANTHROPIC_OAUTH_TOKEN2"
+    }
+  }
+}
+```
+
+Default path: `/root/.openclaw/claude-profiles.json`
+
+Override path for portable installs:
+
+```bash
+FOREMAN_CLAUDE_PROFILES_FILE=/path/to/claude-profiles.json \
+  scripts/dispatch.sh plan /path/to/repo "..." --profile work
+```
+
+Rules:
+- Tokens live only in the environment. The profiles file stores env var names,
+  not token values.
+- Env var names must be shell-safe: `[A-Za-z_][A-Za-z0-9_]*`.
+- `claude-auth-active` is only a local default-profile switch for the
+  `claude-cli` lane. It is not automatic failover.
+- `claude-work` is treated as the `work` profile for Sean's local OpenClaw
+  setup; regular Foreman users do not need that provider wrapper.
+
+To add another account/profile:
+
+1. Export a new Claude setup token in the runtime env, for example
+   `ANTHROPIC_OAUTH_TOKEN3`.
+2. Add a profile entry:
+
+```json
+"backup": {
+  "label": "Backup Claude Seat",
+  "env_var": "ANTHROPIC_OAUTH_TOKEN3",
+  "cooldown_until": 0
+}
+```
+
+3. Smoke test the profile:
+
+```bash
+scripts/smoke-claude-profile.sh --profile backup --model sonnet
+```
+
+4. If the account should appear as an OpenClaw `/models` selectable provider,
+   add or update the OpenClaw CLI backend/model config separately and validate it
+   with:
+
+```bash
+scripts/smoke-openclaw-model.sh --model claude-work/claude-sonnet-4-6
+```
+
+That OpenClaw provider step is intentionally separate from Foreman. Foreman only
+needs profile auth when the caller explicitly asks it to pin an account.
+
+## Live Smoke Tests
+
+The reusable smoke tests save artifacts under `artifacts/smokes/`.
+
+```bash
+# Direct Claude CLI account/profile proof. Prints parsed response text.
+scripts/smoke-claude-profile.sh --profile work --model sonnet
+
+# OpenClaw selectable provider proof through the agent pipeline. Prints parsed response text.
+scripts/smoke-openclaw-model.sh --model claude-work/claude-sonnet-4-6
+```
+
 ## Notes
 This skill is intended for heavier or higher-stakes work where native tool-call editing would be inefficient, context-expensive, or better handled by a separated reviewer/implementer.

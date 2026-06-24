@@ -90,7 +90,11 @@ set -euo pipefail
 : "${FAKE_CLAUDE_LOG:?missing FAKE_CLAUDE_LOG}"
 : "${FAKE_CLAUDE_MODE:=success}"
 
-printf '%s\n' "$@" > "$FAKE_CLAUDE_LOG"
+{
+  printf 'ARGS\n'
+  printf '%s\n' "$@"
+  printf 'TOKEN=%s\n' "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+} > "$FAKE_CLAUDE_LOG"
 
 case "$FAKE_CLAUDE_MODE" in
   success)
@@ -160,6 +164,10 @@ assert_file "$SKILL_DIR/SKILL.md" "SKILL.md exists"
 assert_file "$SKILL_DIR/README.md" "README.md exists"
 assert_file "$SKILL_DIR/scripts/dispatch.sh" "dispatch.sh exists"
 assert_executable "$SKILL_DIR/scripts/dispatch.sh" "dispatch.sh is executable"
+assert_file "$SKILL_DIR/scripts/smoke-claude-profile.sh" "smoke-claude-profile.sh exists"
+assert_executable "$SKILL_DIR/scripts/smoke-claude-profile.sh" "smoke-claude-profile.sh is executable"
+assert_file "$SKILL_DIR/scripts/smoke-openclaw-model.sh" "smoke-openclaw-model.sh exists"
+assert_executable "$SKILL_DIR/scripts/smoke-openclaw-model.sh" "smoke-openclaw-model.sh is executable"
 for profile in plan implement review wide-open; do
   assert_file "$SKILL_DIR/profiles/${profile}.md" "profiles/${profile}.md exists"
 done
@@ -167,9 +175,13 @@ done
 echo ""
 echo "[2] Syntax and lint"
 run_expect_success "dispatch.sh passes bash -n" bash -n "$SKILL_DIR/scripts/dispatch.sh"
+run_expect_success "smoke-claude-profile.sh passes bash -n" bash -n "$SKILL_DIR/scripts/smoke-claude-profile.sh"
+run_expect_success "smoke-openclaw-model.sh passes bash -n" bash -n "$SKILL_DIR/scripts/smoke-openclaw-model.sh"
 if command -v shellcheck >/dev/null 2>&1; then
   run_expect_success "dispatch.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/dispatch.sh"
   run_expect_success "test.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/test.sh"
+  run_expect_success "smoke-claude-profile.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/smoke-claude-profile.sh"
+  run_expect_success "smoke-openclaw-model.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/smoke-openclaw-model.sh"
 else
   echo "  SKIP: shellcheck not installed"
 fi
@@ -243,6 +255,49 @@ echo "[7] Progress redaction"
 redaction_out=$(run_dispatch redaction "$TMPDIR/target" "redaction prompt" --max-turns 3)
 assert_contains "$redaction_out" "https://example.com/path [args stripped]" "strips URL query and fragment in progress output"
 assert_not_contains "$redaction_out" "SECRET_TOKEN" "does not leak URL token in progress output"
+
+echo ""
+echo "[8] Env-backed Claude profiles"
+cat > "$TMPDIR/profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN"
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN"
+    }
+  }
+}
+JSON
+
+profile_out=$(
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch success "$TMPDIR/target" "profile prompt" --profile work --max-turns 3
+)
+assert_contains "$profile_out" "Auth lane: claude-cli (work; env \$FAKE_WORK_TOKEN)" "reports selected profile env var"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "TOKEN=work-token" "exports requested profile token to Claude"
+
+missing_profile_out=$(
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch success "$TMPDIR/target" "missing profile prompt" --profile nope --max-turns 3 || true
+)
+assert_contains "$missing_profile_out" "Unknown Claude profile: nope" "rejects unknown profile"
+
+missing_token_out=$(
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="" \
+  run_dispatch success "$TMPDIR/target" "missing token prompt" --profile work --max-turns 3 || true
+)
+assert_contains "$missing_token_out" "Expected a token in \$FAKE_WORK_TOKEN" "rejects empty profile env var"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

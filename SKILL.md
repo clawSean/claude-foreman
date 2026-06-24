@@ -127,6 +127,44 @@ exec scripts/dispatch.sh wide-open /Users/edgeclaw/Developer/myapp \
   "Inspect the repo, run the needed shell commands, make the code changes, and summarize what changed."
 ```
 
+### Optional Claude Account Profiles
+
+Foreman defaults to ambient Claude CLI auth. Do not require Sean's local routing
+wrapper for regular users.
+
+On a machine with multiple Claude setup-token accounts, a run can pin a profile:
+
+```bash
+exec scripts/dispatch.sh plan /path/to/repo \
+  "Reply exactly: FOREMAN_PROFILE_OK" \
+  --model sonnet \
+  --profile work
+```
+
+Profile resolution is optional and env-only:
+
+- Default profiles file: `/root/.openclaw/claude-profiles.json`
+- Override: `FOREMAN_CLAUDE_PROFILES_FILE=/path/to/claude-profiles.json`
+- Shape: `profiles.<name>.env_var` names the env var containing the Claude
+  setup token.
+- Tokens never belong in scripts or the profiles JSON.
+- `claude-auth-active` is only a local active-profile default for the
+  `claude-cli` lane; keep automated rate-limit switching as a later phase.
+
+Adding a profile/account:
+
+1. Add a shell-safe token env var, e.g. `ANTHROPIC_OAUTH_TOKEN3`.
+2. Add a `profiles.<name>` entry with `label`, `env_var`, and optional
+   `cooldown_until`.
+3. Run `scripts/smoke-claude-profile.sh --profile <name> --model sonnet`.
+4. Only if the account should be selectable from OpenClaw `/models`, wire the
+   OpenClaw CLI backend/model config separately and prove the agent pipeline with
+   `scripts/smoke-openclaw-model.sh --model <provider/model>`.
+
+Do not conflate Foreman profile pinning with OpenClaw model-provider selection:
+Foreman can pin a Claude account without adding a new `/models` provider, and
+normal Foreman use should keep working without any profile flags.
+
 ### Claws-Out Profile (Full Access)
 
 Use `claws-out` when you explicitly want full-access execution (`bypassPermissions`) in a trusted/sandboxed environment and accept the extra risk. It is for "do whatever it takes" runs, not normal use.
