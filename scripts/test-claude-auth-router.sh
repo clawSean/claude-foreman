@@ -82,11 +82,56 @@ run_router() {
   local mode="$1"
   shift
   FAKE_CLAUDE_MODE="$mode" \
-  FAKE_TOKEN="fake-token" \
+  FAKE_PERSONAL_TOKEN="fake-personal-token" \
+  FAKE_WORK_TOKEN="fake-work-token" \
   CLAUDE_PROFILES_FILE="$TMPDIR/profiles.json" \
   CLAUDE_AUTH_ACTIVE_FILE="$TMPDIR/active" \
   PATH="$TMPDIR/fake-bin:$PATH" \
     "$ROUTER" "$@"
+}
+
+write_profiles() {
+  local variant="${1:-two}"
+  case "$variant" in
+    two)
+      cat > "$TMPDIR/profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN",
+      "cooldown_until": 0
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN",
+      "cooldown_until": 0
+    }
+  }
+}
+JSON
+      ;;
+    one)
+      cat > "$TMPDIR/profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN",
+      "cooldown_until": 0
+    }
+  }
+}
+JSON
+      ;;
+    *)
+      echo "Unknown profile fixture: $variant" >&2
+      exit 1
+      ;;
+  esac
+  printf 'personal\n' > "$TMPDIR/active"
 }
 
 echo "=== claude-auth-router offline tests ==="
@@ -100,18 +145,7 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 mkdir -p "$TMPDIR/fake-bin"
 make_fake_claude "$TMPDIR/fake-bin"
-cat > "$TMPDIR/profiles.json" <<'JSON'
-{
-  "active": "personal",
-  "profiles": {
-    "personal": {
-      "label": "Fake Personal",
-      "env_var": "FAKE_TOKEN"
-    }
-  }
-}
-JSON
-printf 'personal\n' > "$TMPDIR/active"
+write_profiles two
 
 set +e
 rate_out=$(run_router stream_rate_limit -p "test" --output-format stream-json --verbose 2>&1)
@@ -122,15 +156,31 @@ if [[ "$rate_exit" -eq 0 ]]; then
 else
   fail "stream-json rate limit exit code was $rate_exit"
 fi
-assert_contains "$rate_out" "Claude hit a session limit before I could answer that." "friendly message is emitted"
+assert_contains "$rate_out" "Claude hit a session limit before I could answer that" "friendly message is emitted"
+assert_contains "$rate_out" "switched Claude from Fake Personal to Fake Work" "friendly message says profile was switched"
+assert_contains "$rate_out" "Please send your last message again now." "friendly message asks for immediate retry"
 assert_contains "$rate_out" '"router_friendly_rate_limit":true' "friendly result is marked"
+assert_contains "$rate_out" '"router_profile_rotated":true' "friendly result marks profile rotation"
+assert_contains "$rate_out" '"router_next_profile":"work"' "friendly result records next profile"
 assert_not_contains "$rate_out" "You've hit your session limit" "raw Claude limit text is suppressed"
 assert_not_contains "$rate_out" '"is_error":true' "raw error result is suppressed"
+assert_contains "$(cat "$TMPDIR/active")" "work" "active profile switches to next usable profile"
+cooldown_check=$(
+  python3 - "$TMPDIR/profiles.json" <<'PY'
+import json, sys, time
+data = json.load(open(sys.argv[1]))
+cooldown = int(data["profiles"]["personal"].get("cooldown_until") or 0)
+print("cooldown-set" if cooldown > int(time.time()) else "cooldown-missing")
+PY
+)
+assert_contains "$cooldown_check" "cooldown-set" "rate-limited profile is cooled down"
 
+write_profiles two
 success_out=$(run_router stream_success_mentions_rate_limit -p "test" --output-format stream-json --verbose 2>&1)
 assert_contains "$success_out" "Here is rate limit documentation." "successful content mentioning rate limit passes through"
 assert_not_contains "$success_out" "router_friendly_rate_limit" "successful content does not trigger friendly rewrite"
 
+write_profiles one
 set +e
 stderr_out=$(run_router stderr_rate_limit -p "test" --output-format stream-json --verbose 2>&1)
 stderr_exit=$?
@@ -141,6 +191,8 @@ else
   fail "stderr-only rate limit exit code was $stderr_exit"
 fi
 assert_contains "$stderr_out" "Claude hit a session limit before I could answer that." "stderr-only rate limit becomes friendly message"
+assert_contains "$stderr_out" "Please try your last message again after the limit resets." "single-profile message avoids immediate retry"
+assert_contains "$stderr_out" '"router_profile_rotated":false' "single-profile result marks no rotation"
 
 interactive_out=$(run_router interactive 2>&1)
 assert_contains "$interactive_out" "INTERACTIVE_OK" "interactive/no-print path passes through"

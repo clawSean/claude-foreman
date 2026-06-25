@@ -205,8 +205,10 @@ Current router behavior:
   through a tiny classifier.
 - Known opening rate-limit/session-limit failures are converted into a friendly
   synthetic success result instead of raw Claude CLI quota text.
-- The router does not retry another account/profile yet. Account rotation lives
-  in Foreman's bounded `--provider claude-cli` dispatch lane.
+- The router still does not retry the failed prompt. For implicit active-profile
+  calls, it cools down the limited profile, switches `claude-auth-active` to the
+  next usable profile, and asks the caller to send the last message again now.
+  Explicit `--auth-profile`/`--profile` calls remain pinned.
 - The classifier keys on failure-channel surfaces observed in real logs:
   `rate_limit_event.status=rejected`, `assistant.error=rate_limit`, result
   `is_error=true` plus `api_error_status` `429`/`529`, or the exact
