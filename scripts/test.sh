@@ -182,6 +182,8 @@ assert_file "$SKILL_DIR/scripts/smoke-claude-profile.sh" "smoke-claude-profile.s
 assert_executable "$SKILL_DIR/scripts/smoke-claude-profile.sh" "smoke-claude-profile.sh is executable"
 assert_file "$SKILL_DIR/scripts/smoke-openclaw-model.sh" "smoke-openclaw-model.sh exists"
 assert_executable "$SKILL_DIR/scripts/smoke-openclaw-model.sh" "smoke-openclaw-model.sh is executable"
+assert_file "$SKILL_DIR/scripts/test-claude-auth-router.sh" "test-claude-auth-router.sh exists"
+assert_executable "$SKILL_DIR/scripts/test-claude-auth-router.sh" "test-claude-auth-router.sh is executable"
 for profile in plan implement review wide-open; do
   assert_file "$SKILL_DIR/profiles/${profile}.md" "profiles/${profile}.md exists"
 done
@@ -196,6 +198,7 @@ if command -v shellcheck >/dev/null 2>&1; then
   run_expect_success "test.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/test.sh"
   run_expect_success "smoke-claude-profile.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/smoke-claude-profile.sh"
   run_expect_success "smoke-openclaw-model.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/smoke-openclaw-model.sh"
+  run_expect_success "test-claude-auth-router.sh passes shellcheck" shellcheck "$SKILL_DIR/scripts/test-claude-auth-router.sh"
 else
   echo "  SKIP: shellcheck not installed"
 fi

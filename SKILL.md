@@ -188,6 +188,25 @@ Do not conflate Foreman profile pinning with OpenClaw model-provider selection:
 Foreman can pin a Claude account without adding a new `/models` provider, and
 normal Foreman use should keep working without any profile flags.
 
+### Sean's Live Claude Router
+
+Sean's local OpenClaw Claude CLI backend wrappers live outside the skill repo at
+`/root/scripts/claude-auth-router.sh` and `/root/scripts/claude-work.sh`.
+
+As of 2026-06-25:
+
+- The live router does not retry another account/profile.
+- Interactive/no-`-p` sessions still pass straight through to Claude.
+- Noninteractive `-p --output-format stream-json` calls convert known opening
+  rate-limit/session-limit failures into a friendly synthetic success result so
+  the caller can ask the user to try again instead of surfacing raw quota text.
+- The classifier is grounded in real Claude CLI artifacts:
+  `rate_limit_event.status=rejected`, `assistant.error=rate_limit`, result
+  `is_error=true` with `api_error_status` `429`/`529`, and the exact
+  `You've hit your session limit` text.
+- Run `scripts/test-claude-auth-router.sh` to regression-test the live wrapper
+  with a fake `claude` binary. No live Claude/API call is made.
+
 ### Claws-Out Profile (Full Access)
 
 Use `claws-out` when you explicitly want full-access execution (`bypassPermissions`) in a trusted/sandboxed environment and accept the extra risk. It is for "do whatever it takes" runs, not normal use.

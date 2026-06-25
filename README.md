@@ -187,5 +187,32 @@ scripts/smoke-claude-profile.sh --profile work --model sonnet
 scripts/smoke-openclaw-model.sh --model claude-work/claude-sonnet-4-6
 ```
 
+## Sean's Live Claude Auth Router
+
+Sean's local OpenClaw Claude CLI backends use
+`/root/scripts/claude-auth-router.sh` and `/root/scripts/claude-work.sh`.
+Those scripts are intentionally outside this standalone skill repo, but this
+repo carries an offline regression test for the live router:
+
+```bash
+scripts/test-claude-auth-router.sh
+```
+
+Current router behavior:
+
+- Interactive/no-`-p` Claude sessions still `exec claude "$@"` and pass through.
+- Noninteractive `-p` calls with `--output-format stream-json` are streamed
+  through a tiny classifier.
+- Known opening rate-limit/session-limit failures are converted into a friendly
+  synthetic success result instead of raw Claude CLI quota text.
+- The router does not retry another account/profile yet. Account rotation lives
+  in Foreman's bounded `--provider claude-cli` dispatch lane.
+- The classifier keys on failure-channel surfaces observed in real logs:
+  `rate_limit_event.status=rejected`, `assistant.error=rate_limit`, result
+  `is_error=true` plus `api_error_status` `429`/`529`, or the exact
+  `You've hit your session limit` wording.
+- Successful content that merely talks about "rate limit" is passed through and
+  does not trigger the friendly rewrite.
+
 ## Notes
 This skill is intended for heavier or higher-stakes work where native tool-call editing would be inefficient, context-expensive, or better handled by a separated reviewer/implementer.
