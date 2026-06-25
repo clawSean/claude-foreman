@@ -156,9 +156,9 @@ if [[ "$rate_exit" -eq 0 ]]; then
 else
   fail "stream-json rate limit exit code was $rate_exit"
 fi
-assert_contains "$rate_out" "Claude hit a session limit before I could answer that" "friendly message is emitted"
-assert_contains "$rate_out" "switched Claude from Fake Personal to Fake Work" "friendly message says profile was switched"
-assert_contains "$rate_out" "Please send your last message again now." "friendly message asks for immediate retry"
+assert_contains "$rate_out" "Claude hit a session limit 🧱" "friendly message is emitted with emoji"
+assert_contains "$rate_out" "switched Claude from Fake Personal to Fake Work 🔁" "friendly message says profile was switched with emoji"
+assert_contains "$rate_out" "Please send your last message again now ⚡" "friendly message asks for immediate retry with emoji"
 assert_contains "$rate_out" '"router_friendly_rate_limit":true' "friendly result is marked"
 assert_contains "$rate_out" '"router_profile_rotated":true' "friendly result marks profile rotation"
 assert_contains "$rate_out" '"router_next_profile":"work"' "friendly result records next profile"
@@ -190,9 +190,24 @@ if [[ "$stderr_exit" -eq 0 ]]; then
 else
   fail "stderr-only rate limit exit code was $stderr_exit"
 fi
-assert_contains "$stderr_out" "Claude hit a session limit before I could answer that." "stderr-only rate limit becomes friendly message"
-assert_contains "$stderr_out" "Please try your last message again after the limit resets." "single-profile message avoids immediate retry"
+assert_contains "$stderr_out" "Claude hit a session limit 🧱" "stderr-only rate limit becomes friendly message with emoji"
+assert_contains "$stderr_out" "Please try your last message again after the limit resets ⏳" "single-profile message avoids immediate retry with emoji"
 assert_contains "$stderr_out" '"router_profile_rotated":false' "single-profile result marks no rotation"
+
+write_profiles two
+set +e
+pinned_out=$(run_router stream_rate_limit --auth-profile personal -p "test" --output-format stream-json --verbose 2>&1)
+pinned_exit=$?
+set -e
+if [[ "$pinned_exit" -eq 0 ]]; then
+  pass "pinned profile rate limit exits successfully with friendly result"
+else
+  fail "pinned profile rate limit exit code was $pinned_exit"
+fi
+assert_contains "$pinned_out" "pinned Fake Personal profile 📌" "pinned-profile message includes pin emoji"
+assert_contains "$pinned_out" "after the limit resets ⏳" "pinned-profile message avoids immediate retry with emoji"
+assert_contains "$pinned_out" '"router_profile_rotated":false' "pinned-profile result marks no rotation"
+assert_contains "$(cat "$TMPDIR/active")" "personal" "pinned profile does not switch active profile"
 
 interactive_out=$(run_router interactive 2>&1)
 assert_contains "$interactive_out" "INTERACTIVE_OK" "interactive/no-print path passes through"

@@ -198,8 +198,9 @@ As of 2026-06-25:
 - The live router does not retry the failed prompt.
 - Interactive/no-`-p` sessions still pass straight through to Claude.
 - Noninteractive `-p --output-format stream-json` calls convert known opening
-  rate-limit/session-limit failures into a friendly synthetic success result so
-  the caller can ask the user to try again instead of surfacing raw quota text.
+  rate-limit/session-limit failures into a friendly, emoji-bearing synthetic
+  success result so the caller can ask the user to try again instead of
+  surfacing raw quota text.
 - For implicit active-profile calls, a known rate/session-limit hit cools down
   the current profile, switches `claude-auth-active` to the next usable profile,
   and asks the caller to send the last message again now. Explicit

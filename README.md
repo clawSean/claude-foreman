@@ -203,8 +203,8 @@ Current router behavior:
 - Interactive/no-`-p` Claude sessions still `exec claude "$@"` and pass through.
 - Noninteractive `-p` calls with `--output-format stream-json` are streamed
   through a tiny classifier.
-- Known opening rate-limit/session-limit failures are converted into a friendly
-  synthetic success result instead of raw Claude CLI quota text.
+- Known opening rate-limit/session-limit failures are converted into a friendly,
+  emoji-bearing synthetic success result instead of raw Claude CLI quota text.
 - The router still does not retry the failed prompt. For implicit active-profile
   calls, it cools down the limited profile, switches `claude-auth-active` to the
   next usable profile, and asks the caller to send the last message again now.
