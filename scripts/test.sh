@@ -94,7 +94,7 @@ set -euo pipefail
   printf 'ARGS\n'
   printf '%s\n' "$@"
   printf 'TOKEN=%s\n' "${CLAUDE_CODE_OAUTH_TOKEN:-}"
-} > "$FAKE_CLAUDE_LOG"
+} >> "$FAKE_CLAUDE_LOG"
 
 case "$FAKE_CLAUDE_MODE" in
   success)
@@ -128,6 +128,20 @@ JSON
 {"type":"assistant","message":{"content":[{"type":"tool_use","name":"WebFetch","input":{"url":"https://example.com/path?token=SECRET_TOKEN#frag"}}],"stop_reason":"tool_use"}}
 {"type":"assistant","message":{"content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}
 {"type":"result","subtype":"success","result":"FOREMAN_REDACTION_OK","total_cost_usd":0,"num_turns":2,"session_id":"fake-redaction-session"}
+JSON
+    ;;
+  rate_limit_personal)
+    if [[ "${CLAUDE_CODE_OAUTH_TOKEN:-}" == "personal-token" ]]; then
+      cat <<'JSON'
+{"type":"assistant","message":{"content":[{"type":"text","text":"You've hit your session limit · resets 2:20am (UTC)"}],"stop_reason":"end_turn"},"error":"rate_limit"}
+{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You've hit your session limit · resets 2:20am (UTC)","total_cost_usd":0,"num_turns":1,"session_id":"fake-rate-limit-session","usage":{"input_tokens":0,"output_tokens":0}}
+JSON
+      exit 1
+    fi
+    cat <<'JSON'
+{"type":"system","subtype":"init","session_id":"fake-fallback-session","model":"opus"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"fallback ok"}],"stop_reason":"end_turn"}}
+{"type":"result","subtype":"success","result":"FOREMAN_FALLBACK_OK","total_cost_usd":0.034,"num_turns":1,"session_id":"fake-fallback-session","usage":{"input_tokens":10,"output_tokens":3}}
 JSON
     ;;
   *)
@@ -298,6 +312,80 @@ missing_token_out=$(
   run_dispatch success "$TMPDIR/target" "missing token prompt" --profile work --max-turns 3 || true
 )
 assert_contains "$missing_token_out" "Expected a token in \$FAKE_WORK_TOKEN" "rejects empty profile env var"
+
+echo ""
+echo "[9] Claude profile fallback"
+cat > "$TMPDIR/fallback-profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN",
+      "cooldown_until": 0
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN",
+      "cooldown_until": 0
+    }
+  }
+}
+JSON
+
+: > "$TMPDIR/claude-rate_limit_personal.log"
+fallback_out=$(
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/fallback-profiles.json" \
+  FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS=600 \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch rate_limit_personal "$TMPDIR/target" "fallback prompt" --provider claude-cli --max-turns 3
+)
+assert_contains "$fallback_out" "Auth lane: claude-cli fallback (personal -> work)" "reports profile fallback order"
+assert_contains "$fallback_out" "Auth attempt 1/2: personal" "prints first auth attempt"
+assert_contains "$fallback_out" "Auth attempt 2/2: work" "prints second auth attempt"
+assert_contains "$fallback_out" "retryable quota signal" "reports retryable quota fallback"
+assert_contains "$fallback_out" "FOREMAN_FALLBACK_OK" "falls through to second profile result"
+assert_contains "$(cat "$TMPDIR/claude-rate_limit_personal.log")" "TOKEN=personal-token" "tries active personal token first"
+assert_contains "$(cat "$TMPDIR/claude-rate_limit_personal.log")" "TOKEN=work-token" "tries work token after personal quota"
+cooldown_check=$(
+  python3 - "$TMPDIR/fallback-profiles.json" <<'PY'
+import json, sys, time
+data = json.load(open(sys.argv[1]))
+cooldown = int(data["profiles"]["personal"].get("cooldown_until") or 0)
+print("cooldown-set" if cooldown > int(time.time()) else "cooldown-missing")
+PY
+)
+assert_contains "$cooldown_check" "cooldown-set" "records cooldown on failed profile"
+
+cat > "$TMPDIR/strict-profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN",
+      "cooldown_until": 0
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN",
+      "cooldown_until": 0
+    }
+  }
+}
+JSON
+
+: > "$TMPDIR/claude-rate_limit_personal.log"
+strict_out=$(
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/strict-profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch rate_limit_personal "$TMPDIR/target" "strict prompt" --profile personal --max-turns 3 || true
+)
+assert_contains "$strict_out" "Auth lane: claude-cli (personal; env \$FAKE_PERSONAL_TOKEN)" "explicit profile remains strict"
+assert_contains "$strict_out" "You've hit your session limit" "strict profile surfaces original quota result"
+assert_not_contains "$(cat "$TMPDIR/claude-rate_limit_personal.log")" "TOKEN=work-token" "strict profile does not try fallback token"
 
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="

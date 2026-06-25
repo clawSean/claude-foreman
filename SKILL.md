@@ -132,7 +132,22 @@ exec scripts/dispatch.sh wide-open /Users/edgeclaw/Developer/myapp \
 Foreman defaults to ambient Claude CLI auth. Do not require Sean's local routing
 wrapper for regular users.
 
-On a machine with multiple Claude setup-token accounts, a run can pin a profile:
+On a machine with multiple Claude setup-token accounts, entering the
+profile-aware `claude-cli` lane enables fallback by default:
+
+```bash
+exec scripts/dispatch.sh plan /path/to/repo \
+  "Reply exactly: FOREMAN_PROFILE_OK" \
+  --model sonnet \
+  --provider claude-cli
+```
+
+Fallback order is active profile first, then the remaining profiles in
+`claude-profiles.json`. Profiles with an active `cooldown_until` are
+de-prioritized, not hard-skipped, so a single-profile setup still works.
+
+A run can also pin a profile. Pinning is strict and never falls through to a
+different account:
 
 ```bash
 exec scripts/dispatch.sh plan /path/to/repo \
@@ -148,8 +163,16 @@ Profile resolution is optional and env-only:
 - Shape: `profiles.<name>.env_var` names the env var containing the Claude
   setup token.
 - Tokens never belong in scripts or the profiles JSON.
-- `claude-auth-active` is only a local active-profile default for the
-  `claude-cli` lane; keep automated rate-limit switching as a later phase.
+- `claude-auth-active` is the first-choice profile for `--provider claude-cli`.
+- `--profile <name>` is strict for proof/debug runs.
+- `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
+  profile without trying the rest of the list.
+- Retry is limited to opening-request quota signals from Claude CLI failure
+  surfaces, such as result events with `api_error_status: 429` or
+  `assistant_error: rate_limit`. Foreman does not retry after tool use, token
+  usage, or non-zero cost.
+- Failed fallback profiles are cooled down in the profiles JSON for
+  `FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS` seconds, default `300`.
 
 Adding a profile/account:
 

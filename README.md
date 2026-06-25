@@ -53,7 +53,7 @@ Then follow the enforcement guidance in `SKILL.md`.
 
 ## Dispatch
 ```bash
-scripts/dispatch.sh <profile> <target_dir> "<prompt>" [--model <alias>] [--worktree] [--force] [--max-turns N]
+scripts/dispatch.sh <profile> <target_dir> "<prompt>" [--model <alias>] [--worktree] [--force] [--max-turns N] [--provider claude-cli|claude-work] [--profile <name>] [--no-profile-fallback]
 ```
 
 Profiles:
@@ -73,8 +73,22 @@ Foreman normally inherits the caller's ambient Claude CLI auth. That keeps the
 standalone skill portable: users who only have one `claude` login can keep using
 the normal dispatch command with no profile setup.
 
-On machines with multiple Claude setup-token accounts, Foreman can pin an auth
-profile for a run:
+On machines with multiple Claude setup-token accounts, Foreman can use the
+profile-aware `claude-cli` lane. With `--provider claude-cli`, fallback is the
+default behavior: Foreman tries the active profile first, then the remaining
+profiles in `claude-profiles.json`, de-prioritizing profiles whose
+`cooldown_until` is still active. If only one profile exists, it simply runs that
+profile once.
+
+```bash
+scripts/dispatch.sh plan /path/to/repo \
+  "Reply exactly: FOREMAN_PROFILE_OK" \
+  --model sonnet \
+  --provider claude-cli
+```
+
+Explicit profile pinning stays strict and never falls through to another
+account:
 
 ```bash
 scripts/dispatch.sh plan /path/to/repo \
@@ -115,10 +129,19 @@ Rules:
 - Tokens live only in the environment. The profiles file stores env var names,
   not token values.
 - Env var names must be shell-safe: `[A-Za-z_][A-Za-z0-9_]*`.
-- `claude-auth-active` is only a local default-profile switch for the
-  `claude-cli` lane. It is not automatic failover.
+- `claude-auth-active` is the first-choice profile for the `claude-cli` fallback
+  lane. If it is absent, the JSON `active` field is used.
+- `--profile <name>` is strict by design. Use it for proof runs and debugging.
+- `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
+  profile without trying the rest of the profile list.
 - `claude-work` is treated as the `work` profile for Sean's local OpenClaw
   setup; regular Foreman users do not need that provider wrapper.
+- Fallback only retries opening-request quota failures, such as a Claude CLI
+  result event with `api_error_status: 429` or `assistant_error: rate_limit`.
+  Foreman does not retry after tool use, token usage, or non-zero cost, so it
+  does not duplicate a run that already made progress.
+- Failed fallback profiles are cooled down in the profiles JSON for
+  `FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS` seconds, default `300`.
 
 To add another account/profile:
 
@@ -149,7 +172,8 @@ scripts/smoke-openclaw-model.sh --model claude-work/claude-sonnet-4-6
 ```
 
 That OpenClaw provider step is intentionally separate from Foreman. Foreman only
-needs profile auth when the caller explicitly asks it to pin an account.
+uses profile auth when the caller enters the profile-aware lane with
+`--provider` or pins an account with `--profile`.
 
 ## Live Smoke Tests
 

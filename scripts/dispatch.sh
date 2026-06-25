@@ -4,7 +4,8 @@
 #
 # Profiles: plan, implement, review, wide-open, claws-out (legacy alias: unsafe)
 # Extra flags: --model sonnet, --effort max, --worktree, --force, --max-turns N,
-#              --provider claude-cli|claude-work, --profile <name>
+#              --provider claude-cli|claude-work, --profile <name>,
+#              --no-profile-fallback
 
 set -euo pipefail
 
@@ -56,7 +57,9 @@ FORCE=""
 EXTRA_MAX_TURNS=""
 PROVIDER=""
 AUTH_PROFILE=""
+AUTH_PROFILE_EXPLICIT=""
 LANE_REQUESTED=""
+PROFILE_FALLBACK_DISABLED=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -87,8 +90,13 @@ while [[ $# -gt 0 ]]; do
       ;;
     --profile)
       AUTH_PROFILE="$2"
+      AUTH_PROFILE_EXPLICIT=1
       LANE_REQUESTED=1
       shift 2
+      ;;
+    --no-profile-fallback)
+      PROFILE_FALLBACK_DISABLED=1
+      shift
       ;;
     *)
       echo "[foreman] Unknown flag: $1" >&2
@@ -204,32 +212,47 @@ MODEL="${MODEL:-$DEFAULT_MODEL}"
 # dispatch.sh shells out to the `claude` binary, which authenticates via the
 # CLAUDE_CODE_OAUTH_TOKEN env var. With no provider/profile flag we preserve
 # normal Foreman behavior and inherit whatever Claude auth the caller already
-# has. When a profile is requested, resolve it through claude-profiles.json:
-# profile name -> env var name -> token value from the environment. The active
-# state file is only used as the default profile when the caller requests the
-# claude-cli lane without naming a profile.
+# has. When the caller enters the profile-aware claude-cli lane, Foreman orders
+# profiles from claude-profiles.json, starts with the active profile, and falls
+# forward on opening-request quota errors. Explicit --profile runs stay strict.
 CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-/root/.openclaw/claude-profiles.json}}"
 CLAUDE_PROFILE_STATE="${FOREMAN_CLAUDE_PROFILE_STATE:-${CLAUDE_AUTH_ACTIVE_FILE:-/root/.openclaw/claude-auth-active}}"
+AUTH_PROFILE_COOLDOWN_SECONDS="${FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS:-300}"
+AUTH_FALLBACK_MODE="ambient"
+AUTH_CANDIDATE_NAMES=()
+AUTH_CANDIDATE_LABELS=()
+AUTH_CANDIDATE_ENV_VARS=()
+AUTH_CANDIDATE_COOLDOWNS=()
 LANE_DESC="inherited (ambient claude auth)"
 
 if [[ -n "$LANE_REQUESTED" ]]; then
+  if [[ ! "$AUTH_PROFILE_COOLDOWN_SECONDS" =~ ^[0-9]+$ ]]; then
+    echo "[foreman] FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS must be an integer number of seconds." >&2
+    exit 1
+  fi
   case "$PROVIDER" in
     claude-work)
       AUTH_PROFILE="${AUTH_PROFILE:-work}"
+      AUTH_FALLBACK_MODE="strict"
       ;;
     claude-cli|"")
-      if [[ -z "$AUTH_PROFILE" ]]; then
-        AUTH_PROFILE="$(cat "$CLAUDE_PROFILE_STATE" 2>/dev/null || true)"
-        AUTH_PROFILE="${AUTH_PROFILE//[$'\t\r\n ']}"
-      fi
-      if [[ -z "$AUTH_PROFILE" ]]; then
-        AUTH_PROFILE="$(python3 -c '
+      if [[ -n "$AUTH_PROFILE_EXPLICIT" || -n "$PROFILE_FALLBACK_DISABLED" ]]; then
+        AUTH_FALLBACK_MODE="strict"
+        if [[ -z "$AUTH_PROFILE" ]]; then
+          AUTH_PROFILE="$(cat "$CLAUDE_PROFILE_STATE" 2>/dev/null || true)"
+          AUTH_PROFILE="${AUTH_PROFILE//[$'\t\r\n ']}"
+        fi
+        if [[ -z "$AUTH_PROFILE" ]]; then
+          AUTH_PROFILE="$(python3 -c '
 import json, sys
 try:
     print((json.load(open(sys.argv[1])).get("active") or "").strip())
 except Exception:
     print("")
 ' "$CLAUDE_PROFILES_FILE")"
+        fi
+      else
+        AUTH_FALLBACK_MODE="fallback"
       fi
       ;;
     *)
@@ -237,7 +260,7 @@ except Exception:
       exit 1
       ;;
   esac
-  if [[ -z "$AUTH_PROFILE" ]]; then
+  if [[ "$AUTH_FALLBACK_MODE" == "strict" && -z "$AUTH_PROFILE" ]]; then
     echo "[foreman] No Claude auth profile selected. Pass --profile <name> or set active in $CLAUDE_PROFILE_STATE / $CLAUDE_PROFILES_FILE." >&2
     exit 1
   fi
@@ -246,46 +269,190 @@ except Exception:
     echo "[foreman] Either omit --profile/--provider to inherit ambient auth, or create a profiles JSON file." >&2
     exit 1
   fi
-  PROFILE_META=$(python3 -c '
-import json, sys
-profiles_file, profile = sys.argv[1], sys.argv[2]
+  PROFILE_META=$(FOREMAN_CLAUDE_PROFILES_FILE="$CLAUDE_PROFILES_FILE" \
+    FOREMAN_CLAUDE_PROFILE_STATE="$CLAUDE_PROFILE_STATE" \
+    FOREMAN_AUTH_FALLBACK_MODE="$AUTH_FALLBACK_MODE" \
+    FOREMAN_AUTH_PROFILE="$AUTH_PROFILE" \
+    python3 - <<'PY'
+import json, os, re, sys, time
+
+sep = "\x1f"
+
+def clean(value):
+    return str(value or "").replace(sep, " ").replace("\n", " ").replace("\r", " ").strip()
+
+def line(kind, *fields):
+    print(sep.join([kind, *[clean(f) for f in fields]]))
+
+profiles_file = os.environ["FOREMAN_CLAUDE_PROFILES_FILE"]
+state_file = os.environ["FOREMAN_CLAUDE_PROFILE_STATE"]
+mode = os.environ.get("FOREMAN_AUTH_FALLBACK_MODE", "strict")
+requested = os.environ.get("FOREMAN_AUTH_PROFILE", "").strip()
+env_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 try:
-    data = json.load(open(profiles_file))
+    with open(profiles_file) as fh:
+        data = json.load(fh)
 except Exception as exc:
-    print(f"ERROR\x1fCannot read {profiles_file}: {exc}")
+    line("ERROR", f"Cannot read {profiles_file}: {exc}")
     sys.exit(0)
 profiles = data.get("profiles") or {}
-entry = profiles.get(profile)
-if not isinstance(entry, dict):
-    print("ERROR\x1fUnknown Claude profile: " + profile)
+if not isinstance(profiles, dict) or not profiles:
+    line("ERROR", f"No profiles found in {profiles_file}")
     sys.exit(0)
-env_var = str(entry.get("env_var") or "").strip()
-label = str(entry.get("label") or profile).strip()
-if not env_var:
-    print("ERROR\x1fClaude profile has no env_var: " + profile)
-else:
-    print(env_var + "\x1f" + label)
-' "$CLAUDE_PROFILES_FILE" "$AUTH_PROFILE")
-  IFS=$'\x1f' read -r LANE_ENV_VAR LANE_LABEL <<< "$PROFILE_META"
-  if [[ "$LANE_ENV_VAR" == "ERROR" ]]; then
-    echo "[foreman] $LANE_LABEL" >&2
+
+def read_active():
+    try:
+        with open(state_file) as fh:
+            active = fh.read().strip()
+            if active:
+                return active
+    except Exception:
+        pass
+    return str(data.get("active") or "").strip()
+
+def cooldown_until(entry):
+    try:
+        return int(float(entry.get("cooldown_until") or 0))
+    except Exception:
+        return 0
+
+def validate_profile(name):
+    entry = profiles.get(name)
+    if not isinstance(entry, dict):
+        return None, f"Unknown Claude profile: {name}"
+    env_var = str(entry.get("env_var") or "").strip()
+    label = str(entry.get("label") or name).strip()
+    if not env_var:
+        return None, f"Claude profile has no env_var: {name}"
+    if not env_re.match(env_var):
+        return None, f"Claude profile '{name}' uses invalid env_var '{env_var}'. Env var names must match [A-Za-z_][A-Za-z0-9_]*."
+    if not os.environ.get(env_var):
+        return None, f"Requested auth lane profile='{name}' but its token env var is empty. Expected a token in ${env_var}"
+    return (name, label or name, env_var, cooldown_until(entry)), None
+
+if mode == "strict":
+    candidate, err = validate_profile(requested)
+    if err:
+        line("ERROR", err)
+    else:
+        line("CAND", *candidate)
+    sys.exit(0)
+
+active = read_active()
+names = []
+if active and active in profiles:
+    names.append(active)
+elif active:
+    line("WARN", f"Active Claude profile '{active}' is not present in {profiles_file}; falling back to file order")
+for name in profiles.keys():
+    if name not in names:
+        names.append(name)
+
+now = int(time.time())
+usable = []
+for name in names:
+    candidate, err = validate_profile(name)
+    if err:
+        line("WARN", err)
+        continue
+    usable.append(candidate)
+
+if not usable:
+    line("ERROR", f"No usable Claude profiles found in {profiles_file}. Check env_var names and exported token variables.")
+    sys.exit(0)
+
+healthy = [c for c in usable if c[3] <= now]
+cooling = [c for c in usable if c[3] > now]
+for candidate in healthy + cooling:
+    line("CAND", *candidate)
+PY
+  )
+  while IFS=$'\x1f' read -r META_KIND META_NAME META_LABEL META_ENV META_COOLDOWN; do
+    [[ -n "$META_KIND" ]] || continue
+    case "$META_KIND" in
+      CAND)
+        AUTH_CANDIDATE_NAMES+=("$META_NAME")
+        AUTH_CANDIDATE_LABELS+=("$META_LABEL")
+        AUTH_CANDIDATE_ENV_VARS+=("$META_ENV")
+        AUTH_CANDIDATE_COOLDOWNS+=("${META_COOLDOWN:-0}")
+        ;;
+      WARN)
+        echo "[foreman] WARNING: $META_NAME" >&2
+        ;;
+      ERROR)
+        echo "[foreman] $META_NAME" >&2
+        echo "[foreman] Profiles file: $CLAUDE_PROFILES_FILE" >&2
+        exit 1
+        ;;
+    esac
+  done <<< "$PROFILE_META"
+
+  if [[ "${#AUTH_CANDIDATE_NAMES[@]}" -eq 0 ]]; then
+    echo "[foreman] No Claude auth profiles were usable." >&2
     echo "[foreman] Profiles file: $CLAUDE_PROFILES_FILE" >&2
     exit 1
   fi
-  if [[ ! "$LANE_ENV_VAR" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-    echo "[foreman] Claude profile '$AUTH_PROFILE' uses invalid env_var '$LANE_ENV_VAR'." >&2
-    echo "[foreman] Env var names must match [A-Za-z_][A-Za-z0-9_]*." >&2
-    exit 1
+
+  if [[ "$AUTH_FALLBACK_MODE" == "strict" ]]; then
+    LANE_DESC="${PROVIDER:-claude-cli} (${AUTH_CANDIDATE_NAMES[0]}; env \$${AUTH_CANDIDATE_ENV_VARS[0]})"
+  else
+    PROFILE_ORDER="${AUTH_CANDIDATE_NAMES[0]}"
+    for ((i = 1; i < ${#AUTH_CANDIDATE_NAMES[@]}; i++)); do
+      PROFILE_ORDER+=" -> ${AUTH_CANDIDATE_NAMES[$i]}"
+    done
+    LANE_DESC="${PROVIDER:-claude-cli} fallback ($PROFILE_ORDER)"
   fi
-  LANE_TOKEN="${!LANE_ENV_VAR:-}"
-  if [[ -z "$LANE_TOKEN" ]]; then
-    echo "[foreman] Requested auth lane (provider='${PROVIDER:-claude-cli}' profile='$AUTH_PROFILE') but its token env var is empty." >&2
-    echo "[foreman] Expected a token in \$$LANE_ENV_VAR, from $CLAUDE_PROFILES_FILE." >&2
-    exit 1
-  fi
-  export CLAUDE_CODE_OAUTH_TOKEN="$LANE_TOKEN"
-  LANE_DESC="${PROVIDER:-claude-cli} ($AUTH_PROFILE; env \$$LANE_ENV_VAR)"
 fi
+
+mark_auth_profile_cooldown() {
+  local profile="$1"
+  local reason="$2"
+  local error_text="$3"
+
+  [[ -f "$CLAUDE_PROFILES_FILE" ]] || return 0
+  (
+    flock -w 10 9 2>/dev/null || true
+    FOREMAN_CLAUDE_PROFILES_FILE="$CLAUDE_PROFILES_FILE" \
+    FOREMAN_AUTH_PROFILE="$profile" \
+    FOREMAN_COOLDOWN_SECONDS="$AUTH_PROFILE_COOLDOWN_SECONDS" \
+    FOREMAN_COOLDOWN_REASON="$reason" \
+    FOREMAN_COOLDOWN_ERROR="$error_text" \
+    python3 - <<'PY'
+import json, os, time
+
+path = os.environ["FOREMAN_CLAUDE_PROFILES_FILE"]
+profile = os.environ["FOREMAN_AUTH_PROFILE"]
+seconds = int(os.environ.get("FOREMAN_COOLDOWN_SECONDS") or "300")
+reason = os.environ.get("FOREMAN_COOLDOWN_REASON", "rate_limit")
+error = (os.environ.get("FOREMAN_COOLDOWN_ERROR", "") or "").replace("\n", " ").strip()[:240]
+now = int(time.time())
+
+try:
+    with open(path) as fh:
+        data = json.load(fh)
+except Exception:
+    raise SystemExit(0)
+
+profiles = data.get("profiles")
+entry = profiles.get(profile) if isinstance(profiles, dict) else None
+if not isinstance(entry, dict):
+    raise SystemExit(0)
+
+entry["cooldown_until"] = now + seconds
+entry["cooldown_reason"] = reason
+entry["last_failed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+if error:
+    entry["last_error"] = error
+
+tmp = path + ".tmp"
+with open(tmp, "w") as fh:
+    json.dump(data, fh, indent=2)
+    fh.write("\n")
+os.replace(tmp, path)
+PY
+  ) 9>"$CLAUDE_PROFILES_FILE.lock" || echo "[foreman] WARNING: failed to update Claude profile cooldown for $profile" >&2
+}
 
 # Append guardrail to constrained profiles so runs end with a written summary.
 if [[ "$ADD_GUARDRAIL" == "1" ]]; then
@@ -346,8 +513,7 @@ mkdir -p "$STREAM_DIR"
 # Include the PID so two dispatches started in the same second (scripted
 # fan-out) can't overwrite each other's stream file.
 STREAM_TS=$(date +%Y%m%d-%H%M%S)
-STREAM_FILE="$STREAM_DIR/${STREAM_TS}-$$-${PROFILE}.jsonl"
-echo "[foreman] Stream: $STREAM_FILE"
+STREAM_FILE=""
 
 # --- Build command ---
 # Use stream-json so the raw event stream lands on disk (file mtime/last event =
@@ -383,12 +549,46 @@ trap 'rm -f "$TMPMETA" "$TMPERR"' EXIT
 
 cd "$TARGET_DIR"
 
-# Pipe Claude's stdout through a filter that (a) writes every raw event line to
-# the stream file and (b) emits compact, hard-truncated progress to stderr.
-# Capture Claude's own exit status via PIPESTATUS (not the filter's) under
-# set -euo pipefail by toggling errexit around the pipeline.
-set +e
-"${CMD[@]}" 2> "$TMPERR" | python3 -u -c '
+AUTH_ATTEMPT_TOTAL=1
+if [[ "$AUTH_FALLBACK_MODE" != "ambient" ]]; then
+  AUTH_ATTEMPT_TOTAL="${#AUTH_CANDIDATE_NAMES[@]}"
+fi
+AUTH_ATTEMPT_PROFILE=""
+AUTH_ATTEMPT_LABEL=""
+AUTH_ATTEMPT_ENV_VAR=""
+AUTH_ATTEMPT_INDEX=0
+EXIT_CODE=0
+
+for ((AUTH_ATTEMPT_INDEX = 0; AUTH_ATTEMPT_INDEX < AUTH_ATTEMPT_TOTAL; AUTH_ATTEMPT_INDEX++)); do
+  : > "$TMPMETA"
+  : > "$TMPERR"
+
+  AUTH_SUFFIX="-ambient-a1"
+  if [[ "$AUTH_FALLBACK_MODE" != "ambient" ]]; then
+    AUTH_ATTEMPT_PROFILE="${AUTH_CANDIDATE_NAMES[$AUTH_ATTEMPT_INDEX]}"
+    AUTH_ATTEMPT_LABEL="${AUTH_CANDIDATE_LABELS[$AUTH_ATTEMPT_INDEX]}"
+    AUTH_ATTEMPT_ENV_VAR="${AUTH_CANDIDATE_ENV_VARS[$AUTH_ATTEMPT_INDEX]}"
+    AUTH_TOKEN="${!AUTH_ATTEMPT_ENV_VAR:-}"
+    if [[ -z "$AUTH_TOKEN" ]]; then
+      echo "[foreman] Auth profile '$AUTH_ATTEMPT_PROFILE' lost its token before dispatch; expected \$$AUTH_ATTEMPT_ENV_VAR." >&2
+      exit 1
+    fi
+    export CLAUDE_CODE_OAUTH_TOKEN="$AUTH_TOKEN"
+    AUTH_SUFFIX="-${AUTH_ATTEMPT_PROFILE}-a$((AUTH_ATTEMPT_INDEX + 1))"
+    if [[ "$AUTH_ATTEMPT_TOTAL" -gt 1 ]]; then
+      echo "[foreman] Auth attempt $((AUTH_ATTEMPT_INDEX + 1))/$AUTH_ATTEMPT_TOTAL: $AUTH_ATTEMPT_PROFILE ($AUTH_ATTEMPT_LABEL; env \$$AUTH_ATTEMPT_ENV_VAR)"
+    fi
+  fi
+
+  STREAM_FILE="$STREAM_DIR/${STREAM_TS}-$$-${PROFILE}${AUTH_SUFFIX}.jsonl"
+  echo "[foreman] Stream: $STREAM_FILE"
+
+  # Pipe Claude's stdout through a filter that (a) writes every raw event line to
+  # the stream file and (b) emits compact, hard-truncated progress to stderr.
+  # Capture Claude's own exit status via PIPESTATUS (not the filter's) under
+  # set -euo pipefail by toggling errexit around the pipeline.
+  set +e
+  "${CMD[@]}" 2> "$TMPERR" | python3 -u -c '
 import sys, json
 stream_path = sys.argv[1]
 SHORT = 100
@@ -470,14 +670,14 @@ for line in iter(sys.stdin.readline, ""):
 sf.flush()
 sf.close()
 ' "$STREAM_FILE"
-EXIT_CODE=${PIPESTATUS[0]}
-set -e
+  EXIT_CODE=${PIPESTATUS[0]}
+  set -e
 
-# --- Normalize the stream into a single metadata object (last result event) ---
-# Produces a JSON with the same field names the downstream banner/cost-log code
-# expects: result, total_cost_usd, num_turns, stop_reason, session_id,
-# permission_denials, plus a found_result flag.
-python3 -c '
+  # --- Normalize the stream into a single metadata object (last result event) ---
+  # Produces a JSON with the same field names the downstream banner/cost-log code
+  # expects: result, total_cost_usd, num_turns, stop_reason, session_id,
+  # permission_denials, plus a found_result flag.
+  python3 -c '
 import sys, json
 stream_path, meta_path = sys.argv[1], sys.argv[2]
 events = []
@@ -495,17 +695,29 @@ except Exception:
     events = []
 result_ev = None
 last_assistant_stop = None
+assistant_errors = []
+tool_use_count = 0
 for e in events:
     if e.get("type") == "assistant":
+        if e.get("error"):
+            assistant_errors.append(str(e.get("error")))
         sr = (e.get("message", {}) or {}).get("stop_reason")
         if sr:
             last_assistant_stop = sr
+        msg = e.get("message", {}) or {}
+        for block in (msg.get("content", []) or []):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                tool_use_count += 1
     elif e.get("type") == "result":
         result_ev = e
 if result_ev is None:
     out = {"result": "", "total_cost_usd": 0, "num_turns": 0,
            "stop_reason": "error", "session_id": "",
-           "permission_denials": [], "found_result": False}
+           "permission_denials": [], "found_result": False,
+           "is_error": False, "api_error_status": "",
+           "assistant_error": assistant_errors[-1] if assistant_errors else "",
+           "tool_use_count": tool_use_count,
+           "usage_input_tokens": 0, "usage_output_tokens": 0}
 else:
     # Coerce subtype: the key may be present with a JSON null value, in which
     # case .get("subtype", "") returns None and None.startswith() would crash.
@@ -522,15 +734,94 @@ else:
             sr = "end_turn"
         else:
             sr = "unknown"
+    usage = result_ev.get("usage") or {}
+    if not isinstance(usage, dict):
+        usage = {}
     out = {"result": result_ev.get("result", ""),
            "total_cost_usd": result_ev.get("total_cost_usd", 0),
            "num_turns": result_ev.get("num_turns", 0),
            "stop_reason": sr,
            "session_id": result_ev.get("session_id", ""),
            "permission_denials": result_ev.get("permission_denials", []) or [],
-           "found_result": True}
+           "found_result": True,
+           "is_error": bool(result_ev.get("is_error")),
+           "api_error_status": result_ev.get("api_error_status", ""),
+           "assistant_error": assistant_errors[-1] if assistant_errors else "",
+           "tool_use_count": tool_use_count,
+           "usage_input_tokens": usage.get("input_tokens", 0) or 0,
+           "usage_output_tokens": usage.get("output_tokens", 0) or 0}
 json.dump(out, open(meta_path, "w"))
 ' "$STREAM_FILE" "$TMPMETA"
+
+  if [[ "$AUTH_FALLBACK_MODE" == "fallback" && "$AUTH_ATTEMPT_INDEX" -lt $((AUTH_ATTEMPT_TOTAL - 1)) ]]; then
+    RETRY_META=$(FOREMAN_META_FILE="$TMPMETA" FOREMAN_STDERR_FILE="$TMPERR" python3 - <<'PY'
+import json, os, re
+
+sep = "\x1f"
+try:
+    with open(os.environ["FOREMAN_META_FILE"]) as fh:
+        d = json.load(fh)
+except Exception:
+    d = {}
+try:
+    with open(os.environ["FOREMAN_STDERR_FILE"]) as fh:
+        stderr = fh.read()
+except Exception:
+    stderr = ""
+
+def num(value):
+    try:
+        return float(value or 0)
+    except Exception:
+        return 0.0
+
+api_status = str(d.get("api_error_status") or "")
+assistant_error = str(d.get("assistant_error") or "")
+tool_uses = int(num(d.get("tool_use_count")))
+input_tokens = int(num(d.get("usage_input_tokens")))
+output_tokens = int(num(d.get("usage_output_tokens")))
+cost = num(d.get("total_cost_usd"))
+is_error = bool(d.get("is_error"))
+result = str(d.get("result") or "")
+
+retryable = False
+reason = ""
+if is_error and api_status in {"429", "529"}:
+    retryable = True
+    reason = f"api_error_status={api_status}"
+elif assistant_error == "rate_limit":
+    retryable = True
+    reason = "assistant_error=rate_limit"
+elif re.search(r"\b(?:429|rate[- ]?limit|usage limit|too many concurrent requests|you(?:'ve| have) hit your session limit)\b", stderr, re.I):
+    retryable = True
+    reason = "stderr-rate-limit"
+
+no_progress = tool_uses == 0 and input_tokens == 0 and output_tokens == 0 and cost == 0
+if not no_progress:
+    retryable = False
+    reason = ""
+
+print(sep.join([
+    "1" if retryable else "0",
+    reason,
+    str(tool_uses),
+    str(input_tokens),
+    str(output_tokens),
+    str(cost),
+    result.replace(sep, " ").replace("\n", " ").replace("\r", " ").strip()[:240],
+]))
+PY
+    )
+    IFS=$'\x1f' read -r SHOULD_RETRY RETRY_REASON _ _ _ _ RETRY_RESULT <<< "$RETRY_META"
+    if [[ "$SHOULD_RETRY" == "1" ]]; then
+      mark_auth_profile_cooldown "$AUTH_ATTEMPT_PROFILE" "rate_limit" "${RETRY_RESULT:-$RETRY_REASON}"
+      echo "[foreman] Auth profile '$AUTH_ATTEMPT_PROFILE' hit retryable quota signal ($RETRY_REASON); cooling it down for ${AUTH_PROFILE_COOLDOWN_SECONDS}s and trying next profile." >&2
+      continue
+    fi
+  fi
+
+  break
+done
 
 # --- Parse normalized metadata ---
 # Read all single-line scalar fields in ONE python3 invocation, joined by the
