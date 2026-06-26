@@ -224,6 +224,69 @@ AUTH_CANDIDATE_LABELS=()
 AUTH_CANDIDATE_ENV_VARS=()
 AUTH_CANDIDATE_COOLDOWNS=()
 LANE_DESC="inherited (ambient claude auth)"
+AUTH_AUTO_DETECTED=""
+
+if [[ -z "$LANE_REQUESTED" && -z "$PROFILE_FALLBACK_DISABLED" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -f "$CLAUDE_PROFILES_FILE" ]]; then
+  AUTO_USABLE_PROFILE_COUNT="$(
+    FOREMAN_CLAUDE_PROFILES_FILE="$CLAUDE_PROFILES_FILE" \
+    FOREMAN_CLAUDE_PROFILE_STATE="$CLAUDE_PROFILE_STATE" \
+      python3 - <<'PY'
+import json, os, re
+
+profiles_file = os.environ["FOREMAN_CLAUDE_PROFILES_FILE"]
+state_file = os.environ["FOREMAN_CLAUDE_PROFILE_STATE"]
+env_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+try:
+    with open(profiles_file) as fh:
+        data = json.load(fh)
+except Exception:
+    print(0)
+    raise SystemExit(0)
+
+profiles = data.get("profiles") or {}
+if not isinstance(profiles, dict) or not profiles:
+    print(0)
+    raise SystemExit(0)
+
+def read_active():
+    try:
+        with open(state_file) as fh:
+            active = fh.read().strip()
+            if active:
+                return active
+    except Exception:
+        pass
+    return str(data.get("active") or "").strip()
+
+active = read_active()
+names = []
+if active and active in profiles:
+    names.append(active)
+for name in profiles.keys():
+    if name not in names:
+        names.append(name)
+
+usable = []
+for name in names:
+    entry = profiles.get(name)
+    if not isinstance(entry, dict):
+        continue
+    env_var = str(entry.get("env_var") or "").strip()
+    if not env_var or not env_re.match(env_var):
+        continue
+    if os.environ.get(env_var):
+        usable.append(name)
+
+print(len(usable))
+PY
+  )"
+  if [[ "$AUTO_USABLE_PROFILE_COUNT" =~ ^[0-9]+$ && "$AUTO_USABLE_PROFILE_COUNT" -ge 2 ]]; then
+    PROVIDER="claude-cli"
+    LANE_REQUESTED=1
+    AUTH_AUTO_DETECTED=1
+  fi
+fi
 
 if [[ -n "$LANE_REQUESTED" ]]; then
   if [[ ! "$AUTH_PROFILE_COOLDOWN_SECONDS" =~ ^[0-9]+$ ]]; then
@@ -402,6 +465,9 @@ PY
       PROFILE_ORDER+=" -> ${AUTH_CANDIDATE_NAMES[$i]}"
     done
     LANE_DESC="${PROVIDER:-claude-cli} fallback ($PROFILE_ORDER)"
+    if [[ -n "$AUTH_AUTO_DETECTED" ]]; then
+      LANE_DESC+=" [auto-detected]"
+    fi
   fi
 fi
 
@@ -497,6 +563,9 @@ if [[ "$FORCE" != "1" ]]; then
 fi
 
 echo "[foreman] Dispatching: profile=$PROFILE model=$MODEL turns=$MAX_TURNS budget_remaining=\$$REMAINING"
+if [[ -n "$AUTH_AUTO_DETECTED" ]]; then
+  echo "[foreman] Auto-detected ${#AUTH_CANDIDATE_NAMES[@]} usable Claude profiles; using profile fallback lane."
+fi
 echo "[foreman] Auth lane: $LANE_DESC"
 if [[ -n "$EFFORT" ]]; then
   echo "[foreman] Effort: $EFFORT"

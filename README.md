@@ -73,6 +73,19 @@ Foreman normally inherits the caller's ambient Claude CLI auth. That keeps the
 standalone skill portable: users who only have one `claude` login can keep using
 the normal dispatch command with no profile setup.
 
+On machines with multiple usable env-token profiles, plain no-flag dispatches
+can enter the profile-aware fallback lane automatically. Auto-detection is
+deliberately conservative:
+
+- `--profile`, `--provider`, and `--no-profile-fallback` always win.
+- If the caller already exported `CLAUDE_CODE_OAUTH_TOKEN`, Foreman preserves
+  that ambient token and does not auto-route.
+- If fewer than two profiles have exported non-empty token env vars, Foreman
+  stays ambient.
+- Missing, malformed, or incomplete profiles config falls back to ambient.
+- The decision keys on usable `claude-profiles.json` entries, not on Sean's
+  local `/root/scripts/claude-auth-router.sh` wrapper.
+
 On machines with multiple Claude setup-token accounts, Foreman can use the
 profile-aware `claude-cli` lane. With `--provider claude-cli`, fallback is the
 default behavior: Foreman tries the active profile first, then the remaining
@@ -133,7 +146,8 @@ Rules:
   lane. If it is absent, the JSON `active` field is used.
 - `--profile <name>` is strict by design. Use it for proof runs and debugging.
 - `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
-  profile without trying the rest of the profile list.
+  profile without trying the rest of the profile list. Without `--provider`, it
+  also suppresses no-flag auto-detection and leaves the run ambient.
 - `claude-work` is treated as the `work` profile for Sean's local OpenClaw
   setup; regular Foreman users do not need that provider wrapper.
 - Fallback only retries opening-request quota failures, such as a Claude CLI

@@ -161,6 +161,7 @@ run_dispatch() {
 
   FAKE_CLAUDE_MODE="$mode" \
   FAKE_CLAUDE_LOG="$TMPDIR/claude-$mode.log" \
+  FOREMAN_CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-$TMPDIR/no-default-profiles.json}" \
   PATH="$TMPDIR/fake-bin:$PATH" \
     "$SKILL_DIR/scripts/dispatch.sh" plan "$target" "$prompt" "$@" 2>&1
 }
@@ -317,7 +318,99 @@ missing_token_out=$(
 assert_contains "$missing_token_out" "Expected a token in \$FAKE_WORK_TOKEN" "rejects empty profile env var"
 
 echo ""
-echo "[9] Claude profile fallback"
+echo "[9] Claude profile auto-detection"
+cat > "$TMPDIR/auto-profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN"
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN"
+    }
+  }
+}
+JSON
+
+: > "$TMPDIR/claude-success.log"
+auto_out=$(
+  unset CLAUDE_CODE_OAUTH_TOKEN
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/auto-profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch success "$TMPDIR/target" "auto profile prompt" --max-turns 3
+)
+assert_contains "$auto_out" "Auto-detected 2 usable Claude profiles; using profile fallback lane." "reports auto-detected profile lane"
+assert_contains "$auto_out" "Auth lane: claude-cli fallback (personal -> work) [auto-detected]" "auto-detected lane uses fallback order"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "TOKEN=personal-token" "auto-detected lane exports active profile token"
+
+cat > "$TMPDIR/one-profile.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN"
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN"
+    }
+  }
+}
+JSON
+
+: > "$TMPDIR/claude-success.log"
+one_profile_out=$(
+  unset CLAUDE_CODE_OAUTH_TOKEN
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/one-profile.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="" \
+  run_dispatch success "$TMPDIR/target" "one profile prompt" --max-turns 3
+)
+assert_contains "$one_profile_out" "Auth lane: inherited (ambient claude auth)" "one usable profile stays ambient by default"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "TOKEN=" "one-profile ambient lane leaves token unset"
+assert_not_contains "$(cat "$TMPDIR/claude-success.log")" "TOKEN=personal-token" "one-profile ambient lane does not export profile token"
+
+: > "$TMPDIR/claude-success.log"
+ambient_token_out=$(
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/auto-profiles.json" \
+  CLAUDE_CODE_OAUTH_TOKEN="ambient-token" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch success "$TMPDIR/target" "ambient token prompt" --max-turns 3
+)
+assert_contains "$ambient_token_out" "Auth lane: inherited (ambient claude auth)" "caller-provided CLAUDE_CODE_OAUTH_TOKEN suppresses auto-detection"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "TOKEN=ambient-token" "ambient token is preserved when provided by caller"
+assert_not_contains "$ambient_token_out" "Auto-detected" "does not report auto-detection when ambient token is provided"
+
+: > "$TMPDIR/claude-success.log"
+no_profile_fallback_out=$(
+  unset CLAUDE_CODE_OAUTH_TOKEN
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/auto-profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch success "$TMPDIR/target" "no profile fallback prompt" --no-profile-fallback --max-turns 3
+)
+assert_contains "$no_profile_fallback_out" "Auth lane: inherited (ambient claude auth)" "--no-profile-fallback without provider suppresses auto-detection"
+assert_not_contains "$no_profile_fallback_out" "Auto-detected" "--no-profile-fallback does not report auto-detection"
+
+echo "not-json" > "$TMPDIR/malformed-profiles.json"
+: > "$TMPDIR/claude-success.log"
+malformed_out=$(
+  unset CLAUDE_CODE_OAUTH_TOKEN
+  FOREMAN_CLAUDE_PROFILES_FILE="$TMPDIR/malformed-profiles.json" \
+  FAKE_PERSONAL_TOKEN="personal-token" \
+  FAKE_WORK_TOKEN="work-token" \
+  run_dispatch success "$TMPDIR/target" "malformed profile prompt" --max-turns 3
+)
+assert_contains "$malformed_out" "Auth lane: inherited (ambient claude auth)" "malformed profiles file falls back to ambient by default"
+
+echo ""
+echo "[10] Claude profile fallback"
 cat > "$TMPDIR/fallback-profiles.json" <<'JSON'
 {
   "active": "personal",

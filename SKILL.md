@@ -132,6 +132,17 @@ exec scripts/dispatch.sh wide-open /Users/edgeclaw/Developer/myapp \
 Foreman defaults to ambient Claude CLI auth. Do not require Sean's local routing
 wrapper for regular users.
 
+Plain no-flag dispatches only auto-enter the profile fallback lane when that is
+clearly useful:
+
+- explicit `--profile`, `--provider`, and `--no-profile-fallback` choices win
+- caller-provided `CLAUDE_CODE_OAUTH_TOKEN` stays ambient and is not overwritten
+- at least two profiles in `claude-profiles.json` must name exported non-empty
+  token env vars
+- missing, malformed, empty, or one-profile config stays ambient
+- never key Foreman routing on Sean's local `/root/scripts/claude-auth-router.sh`
+  wrapper; that wrapper is chat-facing and does not retry Foreman work
+
 On a machine with multiple Claude setup-token accounts, entering the
 profile-aware `claude-cli` lane enables fallback by default:
 
@@ -166,7 +177,8 @@ Profile resolution is optional and env-only:
 - `claude-auth-active` is the first-choice profile for `--provider claude-cli`.
 - `--profile <name>` is strict for proof/debug runs.
 - `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
-  profile without trying the rest of the list.
+  profile without trying the rest of the list. Without `--provider`, it
+  suppresses no-flag auto-detection and preserves ambient auth.
 - Retry is limited to opening-request quota signals from Claude CLI failure
   surfaces, such as result events with `api_error_status: 429` or
   `assistant_error: rate_limit`. Foreman does not retry after tool use, token
