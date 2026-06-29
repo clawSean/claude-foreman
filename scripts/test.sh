@@ -245,6 +245,20 @@ assert_contains "$(cat "$TMPDIR/claude-success.log")" "FINAL-OUTPUT REQUIREMENT"
 assert_contains "$(cat "$TMPDIR/claude-success.log")" "Bash(git:*),Bash(ls:*)" "uses separate Bash allowlist entries"
 
 echo ""
+echo "[5b] Optional extra add-dir roots"
+: > "$TMPDIR/claude-success.log"
+extra_dirs_out=$(
+  FOREMAN_EXTRA_ADD_DIRS="/Users/example:/opt/homebrew:/tmp" \
+  run_dispatch success "$TMPDIR/target" "extra dirs prompt" --max-turns 3
+)
+assert_contains "$extra_dirs_out" "FOREMAN_STREAM_OK" "extra add-dir run succeeds"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "--add-dir" "passes --add-dir when FOREMAN_EXTRA_ADD_DIRS is set"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "/Users/example" "passes first extra add-dir path"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "/opt/homebrew" "passes second extra add-dir path"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "/tmp" "passes third extra add-dir path"
+assert_not_contains "$success_out" "--add-dir" "does not pass --add-dir by default"
+
+echo ""
 echo "[6] Incomplete and diagnostic paths"
 max_out=$(run_dispatch max_turns "$TMPDIR/target" "max prompt" --max-turns 15 || true)
 assert_contains "$max_out" "[foreman] Stop reason: max_turns" "maps error_max_turns to max_turns"

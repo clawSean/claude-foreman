@@ -591,6 +591,15 @@ mkdir -p "$STREAM_DIR"
 STREAM_TS=$(date +%Y%m%d-%H%M%S)
 STREAM_FILE=""
 
+EXTRA_ADD_DIR_ARGS=()
+if [[ -n "${FOREMAN_EXTRA_ADD_DIRS:-}" ]]; then
+  IFS=':' read -r -a EXTRA_ADD_DIRS <<< "$FOREMAN_EXTRA_ADD_DIRS"
+  for dir in "${EXTRA_ADD_DIRS[@]}"; do
+    [[ -n "$dir" ]] || continue
+    EXTRA_ADD_DIR_ARGS+=("$dir")
+  done
+fi
+
 # --- Build command ---
 # Use stream-json so the raw event stream lands on disk (file mtime/last event =
 # real liveness), while a compact filter emits tiny progress lines (no raw JSON
@@ -605,6 +614,10 @@ CMD=(
   --verbose
   --no-session-persistence
 )
+
+if [[ "${#EXTRA_ADD_DIR_ARGS[@]}" -gt 0 ]]; then
+  CMD+=(--add-dir "${EXTRA_ADD_DIR_ARGS[@]}")
+fi
 
 if [[ -n "$EFFORT" ]]; then
   CMD+=(--effort "$EFFORT")
@@ -1001,7 +1014,7 @@ entries.append({
 entries = entries[-200:]
 # Atomic write: dump to a temp file then os.replace so any concurrent reader
 # always sees a complete cost log (old or new), never a half-written file.
-# PID suffix prevents concurrent dispatches from clobbering each other's temp
+# PID suffix prevents concurrent dispatches from clobbering each others temp
 # file when flock is unavailable.
 tmp_path = log_path + f".tmp.{os.getpid()}"
 try:

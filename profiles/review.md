@@ -21,6 +21,9 @@ Note: each `Bash(cmd:*)` is a separate allowlist entry. The combined
 A final-output guardrail is automatically appended to every prompt so the run
 ends with a written summary rather than a dangling tool call.
 
+Optional extra filesystem roots can be exposed with `FOREMAN_EXTRA_ADD_DIRS`,
+for example `FOREMAN_EXTRA_ADD_DIRS="/Users/me:/opt/homebrew:/tmp"`.
+
 ## When to Use
 
 - PR review (diff analysis, quality checks)

@@ -67,6 +67,27 @@ Default model is **Opus** across profiles. Use `--model sonnet` as an explicit l
 
 Compatibility: `unsafe` is still accepted as a legacy alias for `claws-out`. `root-wide` and `claws-wide` are accepted as aliases for `wide-open`.
 
+## Optional Extra Filesystem Roots
+
+Foreman dispatches run with the target directory as Claude's primary working
+area. If your local setup needs Claude to read additional host paths, set
+`FOREMAN_EXTRA_ADD_DIRS` to a colon-separated list before dispatching:
+
+```bash
+FOREMAN_EXTRA_ADD_DIRS="/Users/clawdia:/opt/homebrew:/tmp" \
+  scripts/dispatch.sh plan /path/to/repo "Inspect the local toolchain"
+```
+
+When set, Foreman appends those paths to the Claude CLI command as:
+
+```bash
+--add-dir /Users/clawdia /opt/homebrew /tmp
+```
+
+Keep machine-specific paths in your environment or wrapper scripts, not in the
+shared skill. This keeps the repo portable while still supporting richer local
+inspection on hosts that need it.
+
 ## Optional Claude Account Profiles
 
 Foreman normally inherits the caller's ambient Claude CLI auth. That keeps the

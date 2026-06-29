@@ -132,6 +132,20 @@ exec scripts/dispatch.sh wide-open /Users/edgeclaw/Developer/myapp \
 Foreman defaults to ambient Claude CLI auth. Do not require Sean's local routing
 wrapper for regular users.
 
+### Optional Extra Filesystem Roots
+
+Keep machine-specific `--add-dir` paths out of the shared repo. If a host needs
+Foreman runs to expose additional local roots, set `FOREMAN_EXTRA_ADD_DIRS` to a
+colon-separated list before dispatching:
+
+```bash
+FOREMAN_EXTRA_ADD_DIRS="/Users/clawdia:/opt/homebrew:/tmp" \
+exec scripts/dispatch.sh plan /path/to/repo "Inspect the local toolchain"
+```
+
+`scripts/dispatch.sh` converts that setting into a Claude CLI `--add-dir` list.
+Use environment config or a local wrapper for host-specific values.
+
 Plain no-flag dispatches only auto-enter the profile fallback lane when that is
 clearly useful:
 
