@@ -511,11 +511,18 @@ entry["last_failed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
 if error:
     entry["last_error"] = error
 
-tmp = path + ".tmp"
-with open(tmp, "w") as fh:
-    json.dump(data, fh, indent=2)
-    fh.write("\n")
-os.replace(tmp, path)
+tmp = path + f".tmp.{os.getpid()}"
+try:
+    with open(tmp, "w") as fh:
+        json.dump(data, fh, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+except Exception:
+    try:
+        os.unlink(tmp)
+    except Exception:
+        pass
+    raise
 PY
   ) 9>"$CLAUDE_PROFILES_FILE.lock" || echo "[foreman] WARNING: failed to update Claude profile cooldown for $profile" >&2
 }
@@ -994,9 +1001,18 @@ entries.append({
 entries = entries[-200:]
 # Atomic write: dump to a temp file then os.replace so any concurrent reader
 # always sees a complete cost log (old or new), never a half-written file.
-tmp_path = log_path + ".tmp"
-json.dump(entries, open(tmp_path, "w"), indent=2)
-os.replace(tmp_path, log_path)
+# PID suffix prevents concurrent dispatches from clobbering each other's temp
+# file when flock is unavailable.
+tmp_path = log_path + f".tmp.{os.getpid()}"
+try:
+    json.dump(entries, open(tmp_path, "w"), indent=2)
+    os.replace(tmp_path, log_path)
+except Exception:
+    try:
+        os.unlink(tmp_path)
+    except Exception:
+        pass
+    raise
 '
 ) 9>"$COST_LOG.lock" || echo "[foreman] WARNING: cost-log write failed (continuing)." >&2
 
