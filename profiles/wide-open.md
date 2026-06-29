@@ -26,6 +26,7 @@ Root-safe, noninteractive broad-access mode. This is the closest approximation t
 - This is not true bypass mode
 - Claude can still refuse protected-path operations such as writes inside `.git/`
 - Relative target directories still depend on the caller's current working directory; prefer absolute repo paths when possible
+- Optional extra filesystem roots can be exposed with `FOREMAN_EXTRA_ADD_DIRS`
 
 ## Prompt Tips
 
