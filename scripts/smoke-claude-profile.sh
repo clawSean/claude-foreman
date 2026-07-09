@@ -14,7 +14,6 @@ fi
 SKILL_DIR="$(cd "$(dirname "$SCRIPT_SRC")/.." && pwd)"
 
 PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-/root/.openclaw/claude-profiles.json}}"
-ACTIVE_FILE="${FOREMAN_CLAUDE_PROFILE_STATE:-${CLAUDE_AUTH_ACTIVE_FILE:-/root/.openclaw/claude-auth-active}}"
 PROFILE=""
 MODEL="sonnet"
 PROMPT=""
@@ -77,10 +76,6 @@ for _bin in claude python3; do
   fi
 done
 
-if [[ -z "$PROFILE" ]]; then
-  PROFILE="$(cat "$ACTIVE_FILE" 2>/dev/null || true)"
-  PROFILE="${PROFILE//[$'\t\r\n ']}"
-fi
 if [[ -z "$PROFILE" ]]; then
   PROFILE="$(python3 -c '
 import json, sys

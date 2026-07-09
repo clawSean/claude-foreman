@@ -188,7 +188,9 @@ Profile resolution is optional and env-only:
 - Shape: `profiles.<name>.env_var` names the env var containing the Claude
   setup token.
 - Tokens never belong in scripts or the profiles JSON.
-- `claude-auth-active` is the first-choice profile for `--provider claude-cli`.
+- The JSON `active` field is the first-choice profile for `--provider
+  claude-cli`. The legacy standalone `claude-auth-active` file is retired; to
+  switch the default profile, edit `active` in `claude-profiles.json`.
 - `--profile <name>` is strict for proof/debug runs.
 - `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
   profile without trying the rest of the list. Without `--provider`, it
@@ -228,9 +230,10 @@ As of 2026-06-25:
   success result so the caller can ask the user to try again instead of
   surfacing raw quota text.
 - For implicit active-profile calls, a known rate/session-limit hit cools down
-  the current profile, switches `claude-auth-active` to the next usable profile,
-  and asks the caller to send the last message again now. Explicit
-  `--auth-profile`/`--profile` calls remain pinned.
+  the current profile, switches the JSON `active` field in
+  `claude-profiles.json` to the next usable profile, and asks the caller to
+  send the last message again now. Explicit `--auth-profile`/`--profile` calls
+  remain pinned.
 - The classifier is grounded in real Claude CLI artifacts:
   `rate_limit_event.status=rejected`, `assistant.error=rate_limit`, result
   `is_error=true` with `api_error_status` `429`/`529`, and the exact

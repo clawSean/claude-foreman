@@ -85,7 +85,6 @@ run_router() {
   FAKE_PERSONAL_TOKEN="fake-personal-token" \
   FAKE_WORK_TOKEN="fake-work-token" \
   CLAUDE_PROFILES_FILE="$TMPDIR/profiles.json" \
-  CLAUDE_AUTH_ACTIVE_FILE="$TMPDIR/active" \
   PATH="$TMPDIR/fake-bin:$PATH" \
     "$ROUTER" "$@"
 }
@@ -131,7 +130,10 @@ JSON
       exit 1
       ;;
   esac
-  printf 'personal\n' > "$TMPDIR/active"
+}
+
+json_active() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("active") or "")' "$TMPDIR/profiles.json"
 }
 
 echo "=== claude-auth-router offline tests ==="
@@ -164,7 +166,12 @@ assert_contains "$rate_out" '"router_profile_rotated":true' "friendly result mar
 assert_contains "$rate_out" '"router_next_profile":"work"' "friendly result records next profile"
 assert_not_contains "$rate_out" "You've hit your session limit" "raw Claude limit text is suppressed"
 assert_not_contains "$rate_out" '"is_error":true' "raw error result is suppressed"
-assert_contains "$(cat "$TMPDIR/active")" "work" "active profile switches to next usable profile"
+assert_contains "$(json_active)" "work" "JSON active profile switches to next usable profile"
+if [[ -e "$TMPDIR/active" ]]; then
+  fail "router must not create a standalone active file"
+else
+  pass "router does not create a standalone active file"
+fi
 cooldown_check=$(
   python3 - "$TMPDIR/profiles.json" <<'PY'
 import json, sys, time
@@ -207,7 +214,7 @@ fi
 assert_contains "$pinned_out" "pinned Fake Personal profile 📌" "pinned-profile message includes pin emoji"
 assert_contains "$pinned_out" "after the limit resets ⏳" "pinned-profile message avoids immediate retry with emoji"
 assert_contains "$pinned_out" '"router_profile_rotated":false' "pinned-profile result marks no rotation"
-assert_contains "$(cat "$TMPDIR/active")" "personal" "pinned profile does not switch active profile"
+assert_contains "$(json_active)" "personal" "pinned profile does not switch JSON active profile"
 
 interactive_out=$(run_router interactive 2>&1)
 assert_contains "$interactive_out" "INTERACTIVE_OK" "interactive/no-print path passes through"

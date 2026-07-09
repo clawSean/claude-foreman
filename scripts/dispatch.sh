@@ -216,7 +216,6 @@ MODEL="${MODEL:-$DEFAULT_MODEL}"
 # profiles from claude-profiles.json, starts with the active profile, and falls
 # forward on opening-request quota errors. Explicit --profile runs stay strict.
 CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-/root/.openclaw/claude-profiles.json}}"
-CLAUDE_PROFILE_STATE="${FOREMAN_CLAUDE_PROFILE_STATE:-${CLAUDE_AUTH_ACTIVE_FILE:-/root/.openclaw/claude-auth-active}}"
 AUTH_PROFILE_COOLDOWN_SECONDS="${FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS:-300}"
 AUTH_FALLBACK_MODE="ambient"
 AUTH_CANDIDATE_NAMES=()
@@ -229,12 +228,10 @@ AUTH_AUTO_DETECTED=""
 if [[ -z "$LANE_REQUESTED" && -z "$PROFILE_FALLBACK_DISABLED" && -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" && -f "$CLAUDE_PROFILES_FILE" ]]; then
   AUTO_USABLE_PROFILE_COUNT="$(
     FOREMAN_CLAUDE_PROFILES_FILE="$CLAUDE_PROFILES_FILE" \
-    FOREMAN_CLAUDE_PROFILE_STATE="$CLAUDE_PROFILE_STATE" \
       python3 - <<'PY'
 import json, os, re
 
 profiles_file = os.environ["FOREMAN_CLAUDE_PROFILES_FILE"]
-state_file = os.environ["FOREMAN_CLAUDE_PROFILE_STATE"]
 env_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 try:
@@ -249,17 +246,7 @@ if not isinstance(profiles, dict) or not profiles:
     print(0)
     raise SystemExit(0)
 
-def read_active():
-    try:
-        with open(state_file) as fh:
-            active = fh.read().strip()
-            if active:
-                return active
-    except Exception:
-        pass
-    return str(data.get("active") or "").strip()
-
-active = read_active()
+active = str(data.get("active") or "").strip()
 names = []
 if active and active in profiles:
     names.append(active)
@@ -302,10 +289,6 @@ if [[ -n "$LANE_REQUESTED" ]]; then
       if [[ -n "$AUTH_PROFILE_EXPLICIT" || -n "$PROFILE_FALLBACK_DISABLED" ]]; then
         AUTH_FALLBACK_MODE="strict"
         if [[ -z "$AUTH_PROFILE" ]]; then
-          AUTH_PROFILE="$(cat "$CLAUDE_PROFILE_STATE" 2>/dev/null || true)"
-          AUTH_PROFILE="${AUTH_PROFILE//[$'\t\r\n ']}"
-        fi
-        if [[ -z "$AUTH_PROFILE" ]]; then
           AUTH_PROFILE="$(python3 -c '
 import json, sys
 try:
@@ -324,7 +307,7 @@ except Exception:
       ;;
   esac
   if [[ "$AUTH_FALLBACK_MODE" == "strict" && -z "$AUTH_PROFILE" ]]; then
-    echo "[foreman] No Claude auth profile selected. Pass --profile <name> or set active in $CLAUDE_PROFILE_STATE / $CLAUDE_PROFILES_FILE." >&2
+    echo "[foreman] No Claude auth profile selected. Pass --profile <name> or set \"active\" in $CLAUDE_PROFILES_FILE." >&2
     exit 1
   fi
   if [[ ! -f "$CLAUDE_PROFILES_FILE" ]]; then
@@ -333,7 +316,6 @@ except Exception:
     exit 1
   fi
   PROFILE_META=$(FOREMAN_CLAUDE_PROFILES_FILE="$CLAUDE_PROFILES_FILE" \
-    FOREMAN_CLAUDE_PROFILE_STATE="$CLAUDE_PROFILE_STATE" \
     FOREMAN_AUTH_FALLBACK_MODE="$AUTH_FALLBACK_MODE" \
     FOREMAN_AUTH_PROFILE="$AUTH_PROFILE" \
     python3 - <<'PY'
@@ -348,7 +330,6 @@ def line(kind, *fields):
     print(sep.join([kind, *[clean(f) for f in fields]]))
 
 profiles_file = os.environ["FOREMAN_CLAUDE_PROFILES_FILE"]
-state_file = os.environ["FOREMAN_CLAUDE_PROFILE_STATE"]
 mode = os.environ.get("FOREMAN_AUTH_FALLBACK_MODE", "strict")
 requested = os.environ.get("FOREMAN_AUTH_PROFILE", "").strip()
 env_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -365,13 +346,6 @@ if not isinstance(profiles, dict) or not profiles:
     sys.exit(0)
 
 def read_active():
-    try:
-        with open(state_file) as fh:
-            active = fh.read().strip()
-            if active:
-                return active
-    except Exception:
-        pass
     return str(data.get("active") or "").strip()
 
 def cooldown_until(entry):

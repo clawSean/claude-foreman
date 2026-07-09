@@ -163,8 +163,9 @@ Rules:
 - Tokens live only in the environment. The profiles file stores env var names,
   not token values.
 - Env var names must be shell-safe: `[A-Za-z_][A-Za-z0-9_]*`.
-- `claude-auth-active` is the first-choice profile for the `claude-cli` fallback
-  lane. If it is absent, the JSON `active` field is used.
+- The JSON `active` field is the first-choice profile for the `claude-cli`
+  fallback lane. The legacy standalone `claude-auth-active` file is retired; to
+  switch the default profile, edit `active` in `claude-profiles.json`.
 - `--profile <name>` is strict by design. Use it for proof runs and debugging.
 - `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
   profile without trying the rest of the profile list. Without `--provider`, it
@@ -241,9 +242,10 @@ Current router behavior:
 - Known opening rate-limit/session-limit failures are converted into a friendly,
   emoji-bearing synthetic success result instead of raw Claude CLI quota text.
 - The router still does not retry the failed prompt. For implicit active-profile
-  calls, it cools down the limited profile, switches `claude-auth-active` to the
-  next usable profile, and asks the caller to send the last message again now.
-  Explicit `--auth-profile`/`--profile` calls remain pinned.
+  calls, it cools down the limited profile, switches the JSON `active` field in
+  `claude-profiles.json` to the next usable profile, and asks the caller to send
+  the last message again now. Explicit `--auth-profile`/`--profile` calls remain
+  pinned.
 - The classifier keys on failure-channel surfaces observed in real logs:
   `rate_limit_event.status=rejected`, `assistant.error=rate_limit`, result
   `is_error=true` plus `api_error_status` `429`/`529`, or the exact
