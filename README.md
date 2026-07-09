@@ -246,6 +246,11 @@ Current router behavior:
   `claude-profiles.json` to the next usable profile, and asks the caller to send
   the last message again now. Explicit `--auth-profile`/`--profile` calls remain
   pinned.
+- When every profile is cooling down (nothing left to rotate to), the router
+  surfaces a real error (is_error result + non-zero exit) instead of a friendly
+  synthetic success, so OpenClaw's native model fallback can hand the turn to
+  the next configured model. `CLAUDE_AUTH_ROUTER_ERROR_ON_EXHAUSTED=0` restores
+  the old always-friendly behavior.
 - The classifier keys on failure-channel surfaces observed in real logs:
   `rate_limit_event.status=rejected`, `assistant.error=rate_limit`, result
   `is_error=true` plus `api_error_status` `429`/`529`, or the exact

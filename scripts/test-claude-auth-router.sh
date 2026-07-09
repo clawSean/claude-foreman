@@ -125,6 +125,25 @@ JSON
 }
 JSON
       ;;
+    all_cooling)
+      cat > "$TMPDIR/profiles.json" <<'JSON'
+{
+  "active": "personal",
+  "profiles": {
+    "personal": {
+      "label": "Fake Personal",
+      "env_var": "FAKE_PERSONAL_TOKEN",
+      "cooldown_until": 0
+    },
+    "work": {
+      "label": "Fake Work",
+      "env_var": "FAKE_WORK_TOKEN",
+      "cooldown_until": 9999999999
+    }
+  }
+}
+JSON
+      ;;
     *)
       echo "Unknown profile fixture: $variant" >&2
       exit 1
@@ -187,19 +206,62 @@ success_out=$(run_router stream_success_mentions_rate_limit -p "test" --output-f
 assert_contains "$success_out" "Here is rate limit documentation." "successful content mentioning rate limit passes through"
 assert_not_contains "$success_out" "router_friendly_rate_limit" "successful content does not trigger friendly rewrite"
 
+# All profiles exhausted (single profile, stderr-only limit): the router must
+# surface a REAL error (is_error result + non-zero exit) so OpenClaw's native
+# model fallback can take the turn — not mask it as a friendly success.
 write_profiles one
 set +e
 stderr_out=$(run_router stderr_rate_limit -p "test" --output-format stream-json --verbose 2>&1)
 stderr_exit=$?
 set -e
-if [[ "$stderr_exit" -eq 0 ]]; then
-  pass "stderr-only rate limit exits successfully with friendly result"
+if [[ "$stderr_exit" -ne 0 ]]; then
+  pass "exhausted stderr-only rate limit exits non-zero for native fallback"
 else
-  fail "stderr-only rate limit exit code was $stderr_exit"
+  fail "exhausted stderr-only rate limit exited 0 (fallback would never fire)"
 fi
-assert_contains "$stderr_out" "Claude hit a session limit 🧱" "stderr-only rate limit becomes friendly message with emoji"
-assert_contains "$stderr_out" "Please try your last message again after the limit resets ⏳" "single-profile message avoids immediate retry with emoji"
-assert_contains "$stderr_out" '"router_profile_rotated":false' "single-profile result marks no rotation"
+assert_contains "$stderr_out" '"is_error":true' "exhausted case emits real error result"
+assert_contains "$stderr_out" '"router_all_profiles_exhausted":true' "exhausted case marks all profiles exhausted"
+assert_contains "$stderr_out" "every configured account 🧱" "exhausted message says all accounts are limited"
+assert_not_contains "$stderr_out" '"router_friendly_rate_limit":true' "exhausted case does not emit friendly success"
+
+# Same exhausted case with rotation candidates present but all cooling down.
+write_profiles all_cooling
+set +e
+cooling_out=$(run_router stream_rate_limit -p "test" --output-format stream-json --verbose 2>&1)
+cooling_exit=$?
+set -e
+if [[ "$cooling_exit" -ne 0 ]]; then
+  pass "all-cooling rate limit exits non-zero for native fallback"
+else
+  fail "all-cooling rate limit exited 0 (fallback would never fire)"
+fi
+assert_contains "$cooling_out" '"router_all_profiles_exhausted":true' "all-cooling case marks all profiles exhausted"
+assert_contains "$cooling_out" "every configured account 🧱" "all-cooling message says all accounts are limited"
+assert_contains "$(json_active)" "personal" "all-cooling case leaves JSON active unchanged"
+cooldown_check_exhausted=$(
+  python3 - "$TMPDIR/profiles.json" <<'PY'
+import json, sys, time
+data = json.load(open(sys.argv[1]))
+cooldown = int(data["profiles"]["personal"].get("cooldown_until") or 0)
+print("cooldown-set" if cooldown > int(time.time()) else "cooldown-missing")
+PY
+)
+assert_contains "$cooldown_check_exhausted" "cooldown-set" "exhausted case still cools down the limited profile"
+
+# Opt-out: CLAUDE_AUTH_ROUTER_ERROR_ON_EXHAUSTED=0 restores the old friendly
+# synthetic success for exhausted profiles.
+write_profiles one
+set +e
+optout_out=$(CLAUDE_AUTH_ROUTER_ERROR_ON_EXHAUSTED=0 run_router stderr_rate_limit -p "test" --output-format stream-json --verbose 2>&1)
+optout_exit=$?
+set -e
+if [[ "$optout_exit" -eq 0 ]]; then
+  pass "error-on-exhausted opt-out exits successfully with friendly result"
+else
+  fail "error-on-exhausted opt-out exit code was $optout_exit"
+fi
+assert_contains "$optout_out" '"router_friendly_rate_limit":true' "opt-out emits friendly success result"
+assert_contains "$optout_out" '"router_profile_rotated":false' "opt-out result marks no rotation"
 
 write_profiles two
 set +e
