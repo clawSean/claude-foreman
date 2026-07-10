@@ -76,6 +76,18 @@ JSON
 esac
 SH
   chmod +x "$fake_dir/claude"
+
+  cat > "$fake_dir/openclaw" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${FAKE_OPENCLAW_LOG:-}" ]]; then
+  for arg in "$@"; do
+    printf '[%s]\n' "$arg" >> "$FAKE_OPENCLAW_LOG"
+  done
+fi
+SH
+  chmod +x "$fake_dir/openclaw"
 }
 
 run_router() {
@@ -153,6 +165,16 @@ JSON
 
 json_active() {
   python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("active") or "")' "$TMPDIR/profiles.json"
+}
+
+wait_for_file() {
+  local path="$1"
+  local _
+  for _ in {1..50}; do
+    [[ -s "$path" ]] && return 0
+    sleep 0.1
+  done
+  return 1
 }
 
 echo "=== claude-auth-router offline tests ==="
@@ -247,6 +269,70 @@ print("cooldown-set" if cooldown > int(time.time()) else "cooldown-missing")
 PY
 )
 assert_contains "$cooldown_check_exhausted" "cooldown-set" "exhausted case still cools down the limited profile"
+
+# Source-chat notification must parse OpenClaw's currentChannelId whether it is
+# a bare routable target (`-100...:topic:123`) or a provider-prefixed target.
+# The bug this protects against turned bare targets into `topic:123`, then the
+# fire-and-forget `openclaw message send` failed silently.
+write_profiles all_cooling
+notice_log="$TMPDIR/notice-bare-target.log"
+set +e
+(
+  OPENCLAW_MCP_CURRENT_CHANNEL_ID="-1003911643431:topic:1609" \
+  OPENCLAW_MCP_SOURCE_REPLY_DELIVERY_MODE="message_tool_only" \
+  OPENCLAW_MCP_SESSION_KEY="agent:mainelobster:telegram:group:-1003911643431:topic:1609" \
+  OPENCLAW_MCP_MESSAGE_CHANNEL="telegram" \
+  FAKE_OPENCLAW_LOG="$notice_log" \
+    run_router stream_rate_limit -p "test" --output-format stream-json --verbose >/dev/null 2>&1
+)
+notice_exit=$?
+set -e
+if [[ "$notice_exit" -ne 0 ]]; then
+  pass "source notice exhausted bare-topic target exits non-zero for native fallback"
+else
+  fail "source notice exhausted bare-topic target exited 0 (fallback would never fire)"
+fi
+if wait_for_file "$notice_log"; then
+  pass "source notice invokes openclaw message send for bare-topic target"
+else
+  fail "source notice did not invoke openclaw message send for bare-topic target"
+fi
+notice_args=$(cat "$notice_log" 2>/dev/null || true)
+assert_contains "$notice_args" "[--channel]" "source notice includes channel flag"
+assert_contains "$notice_args" "[telegram]" "source notice uses telegram channel"
+assert_contains "$notice_args" "[--target]" "source notice includes target flag"
+assert_contains "$notice_args" "[-1003911643431]" "source notice keeps group target"
+assert_contains "$notice_args" "[--thread-id]" "source notice includes thread flag"
+assert_contains "$notice_args" "[1609]" "source notice keeps topic id"
+assert_not_contains "$notice_args" "[topic:1609]" "source notice does not corrupt target into topic-only"
+
+write_profiles all_cooling
+notice_prefixed_log="$TMPDIR/notice-prefixed-target.log"
+set +e
+(
+  OPENCLAW_MCP_CURRENT_CHANNEL_ID="telegram:-1003911643431:topic:1609" \
+  OPENCLAW_MCP_SOURCE_REPLY_DELIVERY_MODE="message_tool_only" \
+  OPENCLAW_MCP_SESSION_KEY="agent:mainelobster:telegram:group:-1003911643431:topic:1609" \
+  OPENCLAW_MCP_MESSAGE_CHANNEL="telegram" \
+  FAKE_OPENCLAW_LOG="$notice_prefixed_log" \
+    run_router stream_rate_limit -p "test" --output-format stream-json --verbose >/dev/null 2>&1
+)
+prefixed_notice_exit=$?
+set -e
+if [[ "$prefixed_notice_exit" -ne 0 ]]; then
+  pass "source notice exhausted provider-prefixed target exits non-zero for native fallback"
+else
+  fail "source notice exhausted provider-prefixed target exited 0 (fallback would never fire)"
+fi
+if wait_for_file "$notice_prefixed_log"; then
+  pass "source notice invokes openclaw message send for provider-prefixed target"
+else
+  fail "source notice did not invoke openclaw message send for provider-prefixed target"
+fi
+prefixed_notice_args=$(cat "$notice_prefixed_log" 2>/dev/null || true)
+assert_contains "$prefixed_notice_args" "[-1003911643431]" "provider-prefixed source notice keeps group target"
+assert_contains "$prefixed_notice_args" "[1609]" "provider-prefixed source notice keeps topic id"
+assert_not_contains "$prefixed_notice_args" "[telegram:-1003911643431]" "provider-prefixed source notice strips provider from target"
 
 # Opt-out: CLAUDE_AUTH_ROUTER_ERROR_ON_EXHAUSTED=0 restores the old friendly
 # synthetic success for exhausted profiles.
