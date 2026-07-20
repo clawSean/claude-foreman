@@ -105,7 +105,7 @@ deliberately conservative:
   stays ambient.
 - Missing, malformed, or incomplete profiles config falls back to ambient.
 - The decision keys on usable `claude-profiles.json` entries, not on Sean's
-  local `/root/scripts/claude-auth-router.sh` wrapper.
+  local `~/scripts/claude-auth-router.sh` wrapper.
 
 On machines with multiple Claude setup-token accounts, Foreman can use the
 profile-aware `claude-cli` lane. With `--provider claude-cli`, fallback is the
@@ -150,7 +150,7 @@ Foreman resolves auth through a profiles JSON file:
 }
 ```
 
-Default path: `/root/.openclaw/claude-profiles.json`
+Default path: `~/.openclaw/claude-profiles.json`
 
 Override path for portable installs:
 
@@ -211,6 +211,51 @@ That OpenClaw provider step is intentionally separate from Foreman. Foreman only
 uses profile auth when the caller enters the profile-aware lane with
 `--provider` or pins an account with `--profile`.
 
+## Mac Node Claude Auth Router
+
+For <YourMacNode>/Mac-hosted Claude work, use:
+
+```bash
+scripts/mac-node-claude-foreman-auth-router.sh
+```
+
+Canonical source lives in this skill. On the Mac, sync the skill to:
+
+```bash
+/Users/clawPop/.openclaw/skills/claude-foreman
+```
+
+The convenience command should be a symlink to the script inside that skill:
+
+```bash
+/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh
+```
+
+It sources the Mac-local env file:
+
+```bash
+/Users/clawPop/.openclaw/.env
+```
+
+The env file must be mode `600`. The default token name is
+`ANTHROPIC_OAUTH_TOKEN`; optional profile setups can still use
+`ANTHROPIC_OAUTH_TOKEN1`, `ANTHROPIC_OAUTH_TOKEN2`, etc.
+
+Direct Claude smoke:
+
+```bash
+/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh \
+  -p "Reply exactly: MAC_ROUTER_OK"
+```
+
+Foreman wrapper form:
+
+```bash
+/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh -- \
+  /Users/clawPop/.openclaw/skills/claude-foreman/scripts/dispatch.sh plan /path/to/repo \
+  "Review this and summarize findings."
+```
+
 ## Live Smoke Tests
 
 The reusable smoke tests save artifacts under `artifacts/smokes/`.
@@ -226,7 +271,7 @@ scripts/smoke-openclaw-model.sh --model claude-work/claude-sonnet-4-6
 ## Sean's Live Claude Auth Router
 
 Sean's local OpenClaw Claude CLI backends use
-`/root/scripts/claude-auth-router.sh` and `/root/scripts/claude-work.sh`.
+`~/scripts/claude-auth-router.sh` and `~/scripts/claude-work.sh`.
 Those scripts are intentionally outside this standalone skill repo, but this
 repo carries an offline regression test for the live router:
 

@@ -215,7 +215,7 @@ MODEL="${MODEL:-$DEFAULT_MODEL}"
 # has. When the caller enters the profile-aware claude-cli lane, Foreman orders
 # profiles from claude-profiles.json, starts with the active profile, and falls
 # forward on opening-request quota errors. Explicit --profile runs stay strict.
-CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-/root/.openclaw/claude-profiles.json}}"
+CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-~/.openclaw/claude-profiles.json}}"
 AUTH_PROFILE_COOLDOWN_SECONDS="${FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS:-300}"
 AUTH_FALLBACK_MODE="ambient"
 AUTH_CANDIDATE_NAMES=()
