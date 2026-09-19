@@ -1,9 +1,9 @@
 # claude-foreman
 
-**Canonical source:** this standalone repo, `clawSean/claude-foreman`.
+**Canonical source:** this standalone repo, `clawthe contributor/claude-foreman`.
 
 The SkillReef collection may carry a mirrored distribution copy at
-`clawSean/skillreef/skills/claude-foreman`, but changes should originate here
+`clawthe contributor/skillreef/skills/claude-foreman`, but changes should originate here
 first and then be synced outward.
 
 OpenClaw skill for dispatching bounded planning, review, and implementation jobs to Claude CLI while keeping OpenClaw (a multi-channel agent gateway/orchestrator) in charge.
@@ -74,14 +74,14 @@ area. If your local setup needs Claude to read additional host paths, set
 `FOREMAN_EXTRA_ADD_DIRS` to a colon-separated list before dispatching:
 
 ```bash
-FOREMAN_EXTRA_ADD_DIRS="/Users/clawdia:/opt/homebrew:/tmp" \
+FOREMAN_EXTRA_ADD_DIRS="~:/opt/homebrew:/tmp" \
   scripts/dispatch.sh plan /path/to/repo "Inspect the local toolchain"
 ```
 
 When set, Foreman appends those paths to the Claude CLI command as:
 
 ```bash
---add-dir /Users/clawdia /opt/homebrew /tmp
+--add-dir ~ /opt/homebrew /tmp
 ```
 
 Keep machine-specific paths in your environment or wrapper scripts, not in the
@@ -104,7 +104,7 @@ deliberately conservative:
 - If fewer than two profiles have exported non-empty token env vars, Foreman
   stays ambient.
 - Missing, malformed, or incomplete profiles config falls back to ambient.
-- The decision keys on usable `claude-profiles.json` entries, not on Sean's
+- The decision keys on usable `claude-profiles.json` entries, not on the contributor's
   local `~/scripts/claude-auth-router.sh` wrapper.
 
 On machines with multiple Claude setup-token accounts, Foreman can use the
@@ -139,7 +139,7 @@ Foreman resolves auth through a profiles JSON file:
   "active": "personal",
   "profiles": {
     "personal": {
-      "label": "JPop Personal",
+      "label": "the reviewer Personal",
       "env_var": "ANTHROPIC_OAUTH_TOKEN1"
     },
     "work": {
@@ -170,7 +170,7 @@ Rules:
 - `--no-profile-fallback` keeps `--provider claude-cli` on the active/default
   profile without trying the rest of the profile list. Without `--provider`, it
   also suppresses no-flag auto-detection and leaves the run ambient.
-- `claude-work` is treated as the `work` profile for Sean's local OpenClaw
+- `claude-work` is treated as the `work` profile for the contributor's local OpenClaw
   setup; regular Foreman users do not need that provider wrapper.
 - Fallback only retries opening-request quota failures, such as a Claude CLI
   result event with `api_error_status: 429` or `assistant_error: rate_limit`.
@@ -222,19 +222,19 @@ scripts/mac-node-claude-foreman-auth-router.sh
 Canonical source lives in this skill. On the Mac, sync the skill to:
 
 ```bash
-/Users/clawPop/.openclaw/skills/claude-foreman
+~/.openclaw/skills/claude-foreman
 ```
 
 The convenience command should be a symlink to the script inside that skill:
 
 ```bash
-/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh
+~/.openclaw/bin/mac-node-claude-foreman-auth-router.sh
 ```
 
 It sources the Mac-local env file:
 
 ```bash
-/Users/clawPop/.openclaw/.env
+~/.openclaw/.env
 ```
 
 The env file must be mode `600`. The default token name is
@@ -244,15 +244,15 @@ The env file must be mode `600`. The default token name is
 Direct Claude smoke:
 
 ```bash
-/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh \
+~/.openclaw/bin/mac-node-claude-foreman-auth-router.sh \
   -p "Reply exactly: MAC_ROUTER_OK"
 ```
 
 Foreman wrapper form:
 
 ```bash
-/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh -- \
-  /Users/clawPop/.openclaw/skills/claude-foreman/scripts/dispatch.sh plan /path/to/repo \
+~/.openclaw/bin/mac-node-claude-foreman-auth-router.sh -- \
+  ~/.openclaw/skills/claude-foreman/scripts/dispatch.sh plan /path/to/repo \
   "Review this and summarize findings."
 ```
 
@@ -268,9 +268,9 @@ scripts/smoke-claude-profile.sh --profile work --model sonnet
 scripts/smoke-openclaw-model.sh --model claude-work/claude-sonnet-4-6
 ```
 
-## Sean's Live Claude Auth Router
+## the contributor's Live Claude Auth Router
 
-Sean's local OpenClaw Claude CLI backends use
+the contributor's local OpenClaw Claude CLI backends use
 `~/scripts/claude-auth-router.sh` and `~/scripts/claude-work.sh`.
 Those scripts are intentionally outside this standalone skill repo, but this
 repo carries an offline regression test for the live router:

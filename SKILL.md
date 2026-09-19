@@ -1,6 +1,6 @@
 ---
 name: "claude-foreman"
-description: "Dispatch bounded planning, review, and implementation jobs to Claude CLI for isolated execution while the main agent remains orchestrator. Delegate generously: multi-file refactors, edits over ~50 lines, codebase exploration plus implementation, deep code reviews, second opinions, parallel review lanes, or any task needing more than 3-4 sequential tool calls. User-requested Foreman defaults to the best model and max thinking. Do NOT use for quick one-line fixes, simple config changes, or short lookups."
+description: "Delegate work to Claude CLI with profiles, artifacts, and approval-safe execution."
 ---
 
 # Claude Foreman
@@ -32,9 +32,9 @@ Be generous across:
 - **Separation:** let Foreman inspect or reason in isolation while the main agent
   keeps user context, orchestration, and final decisions.
 
-When JPop explicitly asks to use Foreman, default to the best available Claude
+When the reviewer explicitly asks to use Foreman, default to the best available Claude
 model and typically the highest thinking/effort mode. Do not choose fast mode or
-Haiku for a user-requested Foreman run unless JPop explicitly asks for a cheap or
+Haiku for a user-requested Foreman run unless the reviewer explicitly asks for a cheap or
 fast pass.
 
 ## Use It When
@@ -88,10 +88,12 @@ On Linux hosts running as root, `claws-out` is blocked by Claude; use
   is a specific reason not to.
 - Use `--model sonnet` only as an explicit lighter-cost escape hatch for routine,
   low-risk dispatches.
-- Fable (`fable` / `claude-fable-5`) is known to this harness but is not a
-  default or standing recommendation. Consider suggesting it to JPop only for
-  token-efficient, important tasks such as architecture plans, high-stakes
-  reviews, or compact strategic planning; get approval before dispatching it.
+- Fable (`fable` / `claude-fable-5-1`) is known to this harness but is not a
+  default or standing recommendation. The unaliased `claude-fable-5` route is
+  retained only for explicit compatibility testing. Consider suggesting Fable
+  5.1 to the reviewer only for token-efficient, important tasks such as architecture
+  plans, high-stakes reviews, or compact strategic planning; get approval before
+  dispatching it.
 - Do not use Haiku/fast mode for Foreman unless the user explicitly asks for a
   fast/cheap pass.
 - If multiple independent lanes help, run them concurrently and keep prompts
@@ -116,7 +118,7 @@ Common examples:
 ```bash
 exec scripts/dispatch.sh plan ~/.openclaw/workspace \
   "Review this template and suggest a better bootstrap block." \
-  --model opus --effort max --max-turns 16
+  --model opus --effort max --max-turns 16 --max-budget-usd 6
 
 exec scripts/dispatch.sh review ~/projects/example \
   "Review the current branch vs main for regressions and missing tests." \
@@ -150,6 +152,12 @@ If a run exits with `SIGKILL` and no Claude result, suspect wrapper timeout firs
 - For parallel lanes, assign different angles so results are complementary.
 - Ask for compact conclusions plus concrete artifacts, not open-ended essays.
 - Keep external actions out of Foreman prompts unless explicitly authorized.
+- Workspace install, upgrade, repair, and restart approval rules also bind
+  delegated runs. Without approval, forbid package-manager commands—including
+  background or worktree-local installs—and treat missing dependencies as a
+  blocker.
+- For `wide-open` runs, monitor the early stream/process list and interrupt
+  unauthorized install or restart activity; prompt wording is not enforcement.
 
 `dispatch.sh` appends a final-output guardrail for constrained profiles, so Claude
 should end with a written summary rather than a final tool call.
@@ -198,16 +206,16 @@ Canonical source:
 - `skills/claude-foreman/scripts/mac-node-claude-foreman-auth-router.sh`
 
 Installed Mac skill copy:
-- `/Users/clawPop/.openclaw/skills/claude-foreman`
+- `~/.openclaw/skills/claude-foreman`
 
 Convenience Mac command:
-- `/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh`
+- `~/.openclaw/bin/mac-node-claude-foreman-auth-router.sh`
 - This should be a symlink to
-  `/Users/clawPop/.openclaw/skills/claude-foreman/scripts/mac-node-claude-foreman-auth-router.sh`,
+  `~/.openclaw/skills/claude-foreman/scripts/mac-node-claude-foreman-auth-router.sh`,
   not a second real copy.
 
 Mac env file:
-- `/Users/clawPop/.openclaw/.env`, mode `600`
+- `~/.openclaw/.env`, mode `600`
 - Default token variable: `ANTHROPIC_OAUTH_TOKEN`
 - Optional profile variables: `ANTHROPIC_OAUTH_TOKEN1`, `ANTHROPIC_OAUTH_TOKEN2`
 
@@ -219,11 +227,11 @@ profiles, logs, or repo files.
 Examples:
 
 ```bash
-/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh \
+~/.openclaw/bin/mac-node-claude-foreman-auth-router.sh \
   -p "Reply exactly: MAC_ROUTER_OK"
 
-/Users/clawPop/.openclaw/bin/mac-node-claude-foreman-auth-router.sh -- \
-  /Users/clawPop/.openclaw/skills/claude-foreman/scripts/dispatch.sh plan /path/to/repo \
+~/.openclaw/bin/mac-node-claude-foreman-auth-router.sh -- \
+  ~/.openclaw/skills/claude-foreman/scripts/dispatch.sh plan /path/to/repo \
   "Review this and summarize findings."
 ```
 
@@ -236,13 +244,17 @@ warns but proceeds. Respect the budget warnings, but do not let routine cost
 concerns silently downgrade a user-requested Foreman run from Opus/max; report
 the budget issue if it blocks or meaningfully changes the lane.
 
+`--max-turns` bounds agent interaction, not spend. Use `--max-budget-usd <N>`
+for a real Claude CLI per-run dollar ceiling. Every Fable dispatch requires an
+explicit `--max-budget-usd`; the wrapper fails closed when it is absent.
+
 ## Fallback
 
 If Claude CLI is rate-limited or quota-blocked:
 
 1. Try the configured profile fallback lane when available.
 2. If still blocked, check whether Codex CLI is available and authed.
-3. Otherwise log the failure and tell JPop what blocked the run.
+3. Otherwise log the failure and tell the reviewer what blocked the run.
 
 ## Logging
 

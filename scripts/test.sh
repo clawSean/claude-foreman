@@ -119,7 +119,7 @@ JSON
   permission_denial)
     cat <<'JSON'
 {"type":"system","subtype":"init","session_id":"fake-denial-session","model":"opus"}
-{"type":"result","subtype":"success","result":"FOREMAN_DENIAL_OK","total_cost_usd":0.25,"num_turns":2,"session_id":"fake-denial-session","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"cat /root/.secrets/example"}}]}
+{"type":"result","subtype":"success","result":"FOREMAN_DENIAL_OK","total_cost_usd":0.25,"num_turns":2,"session_id":"fake-denial-session","permission_denials":[{"tool_name":"Bash","tool_input":{"command":"cat ~/.secrets/example"}}]}
 JSON
     ;;
   redaction)
@@ -183,8 +183,6 @@ assert_file "$SKILL_DIR/scripts/smoke-claude-profile.sh" "smoke-claude-profile.s
 assert_executable "$SKILL_DIR/scripts/smoke-claude-profile.sh" "smoke-claude-profile.sh is executable"
 assert_file "$SKILL_DIR/scripts/smoke-openclaw-model.sh" "smoke-openclaw-model.sh exists"
 assert_executable "$SKILL_DIR/scripts/smoke-openclaw-model.sh" "smoke-openclaw-model.sh is executable"
-assert_file "$SKILL_DIR/scripts/test-claude-auth-router.sh" "test-claude-auth-router.sh exists"
-assert_executable "$SKILL_DIR/scripts/test-claude-auth-router.sh" "test-claude-auth-router.sh is executable"
 for profile in plan implement review wide-open; do
   assert_file "$SKILL_DIR/profiles/${profile}.md" "profiles/${profile}.md exists"
 done
@@ -212,6 +210,8 @@ run_expect_failure "dispatch.sh with 2 args exits non-zero" "$SKILL_DIR/scripts/
 run_expect_failure "dispatch.sh rejects unknown profile" "$SKILL_DIR/scripts/dispatch.sh" bogus-profile "$TMPDIR/target" "test"
 run_expect_failure "dispatch.sh rejects nonexistent target dir" "$SKILL_DIR/scripts/dispatch.sh" plan "$TMPDIR/nope" "test"
 run_expect_failure "dispatch.sh rejects unknown flags" "$SKILL_DIR/scripts/dispatch.sh" plan "$TMPDIR/target" "test" --bogus-flag
+run_expect_failure "dispatch.sh rejects invalid dollar cap" "$SKILL_DIR/scripts/dispatch.sh" plan "$TMPDIR/target" "test" --max-budget-usd nope
+run_expect_failure "Fable requires an explicit dollar cap" "$SKILL_DIR/scripts/dispatch.sh" plan "$TMPDIR/target" "test" --model fable
 
 echo ""
 echo "[4] Root safety"
@@ -244,16 +244,22 @@ assert_contains "$(cat "$TMPDIR/claude-success.log")" "--verbose" "passes --verb
 assert_contains "$(cat "$TMPDIR/claude-success.log")" "FINAL-OUTPUT REQUIREMENT" "appends final-output guardrail"
 assert_contains "$(cat "$TMPDIR/claude-success.log")" "Bash(git:*),Bash(ls:*)" "uses separate Bash allowlist entries"
 
+: > "$TMPDIR/claude-success.log"
+budget_out=$(run_dispatch success "$TMPDIR/target" "budget prompt" --model fable --max-turns 3 --max-budget-usd 1.25)
+assert_contains "$budget_out" "Per-run spend cap: \$1.25" "reports the per-run dollar cap"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "--max-budget-usd" "passes the Claude CLI dollar-cap flag"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "1.25" "passes the requested dollar-cap value"
+
 echo ""
 echo "[5b] Optional extra add-dir roots"
 : > "$TMPDIR/claude-success.log"
 extra_dirs_out=$(
-  FOREMAN_EXTRA_ADD_DIRS="/Users/example:/opt/homebrew:/tmp" \
+  FOREMAN_EXTRA_ADD_DIRS="~:/opt/homebrew:/tmp" \
   run_dispatch success "$TMPDIR/target" "extra dirs prompt" --max-turns 3
 )
 assert_contains "$extra_dirs_out" "FOREMAN_STREAM_OK" "extra add-dir run succeeds"
 assert_contains "$(cat "$TMPDIR/claude-success.log")" "--add-dir" "passes --add-dir when FOREMAN_EXTRA_ADD_DIRS is set"
-assert_contains "$(cat "$TMPDIR/claude-success.log")" "/Users/example" "passes first extra add-dir path"
+assert_contains "$(cat "$TMPDIR/claude-success.log")" "~" "passes first extra add-dir path"
 assert_contains "$(cat "$TMPDIR/claude-success.log")" "/opt/homebrew" "passes second extra add-dir path"
 assert_contains "$(cat "$TMPDIR/claude-success.log")" "/tmp" "passes third extra add-dir path"
 assert_not_contains "$success_out" "--add-dir" "does not pass --add-dir by default"

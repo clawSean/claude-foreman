@@ -13,7 +13,7 @@ elif command -v realpath >/dev/null 2>&1; then
 fi
 SKILL_DIR="$(cd "$(dirname "$SCRIPT_SRC")/.." && pwd)"
 
-PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-/root/.openclaw/claude-profiles.json}}"
+PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-~/.openclaw/claude-profiles.json}}"
 PROFILE=""
 MODEL="sonnet"
 PROMPT=""
@@ -25,7 +25,7 @@ Usage: smoke-claude-profile.sh --profile <name> [options]
 
 Options:
   --profile <name>        Profile key from claude-profiles.json.
-  --profiles-file <path>  Profile JSON path. Default: /root/.openclaw/claude-profiles.json
+  --profiles-file <path>  Profile JSON path. Default: ~/.openclaw/claude-profiles.json
   --model <model>         Claude model alias/id. Default: sonnet
   --prompt <text>         Prompt to send. Default: unique exact-reply sentinel
   --timeout <seconds>     Live command timeout. Default: 180

@@ -4,6 +4,7 @@
 #
 # Profiles: plan, implement, review, wide-open, claws-out (legacy alias: unsafe)
 # Extra flags: --model sonnet, --effort max, --worktree, --force, --max-turns N,
+#              --max-budget-usd N,
 #              --provider claude-cli|claude-work, --profile <name>,
 #              --no-profile-fallback
 
@@ -55,6 +56,7 @@ EFFORT=""
 WORKTREE=""
 FORCE=""
 EXTRA_MAX_TURNS=""
+MAX_BUDGET_USD=""
 PROVIDER=""
 AUTH_PROFILE=""
 AUTH_PROFILE_EXPLICIT=""
@@ -81,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-turns)
       EXTRA_MAX_TURNS="$2"
+      shift 2
+      ;;
+    --max-budget-usd)
+      MAX_BUDGET_USD="$2"
       shift 2
       ;;
     --provider)
@@ -208,6 +214,28 @@ fi
 
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 
+if [[ -n "$MAX_BUDGET_USD" ]] && ! python3 - "$MAX_BUDGET_USD" <<'PY'
+import math, sys
+try:
+    value = float(sys.argv[1])
+except ValueError:
+    raise SystemExit(1)
+raise SystemExit(0 if math.isfinite(value) and value > 0 else 1)
+PY
+then
+  echo "[foreman] --max-budget-usd requires a positive number." >&2
+  exit 1
+fi
+
+case "$MODEL" in
+  fable|claude-fable-5|claude-fable-5-1)
+    if [[ -z "$MAX_BUDGET_USD" ]]; then
+      echo "[foreman] Fable dispatches require --max-budget-usd; --max-turns is not a dependable spend cap." >&2
+      exit 1
+    fi
+    ;;
+esac
+
 # --- Provider / auth-lane selection (optional) ---
 # dispatch.sh shells out to the `claude` binary, which authenticates via the
 # CLAUDE_CODE_OAUTH_TOKEN env var. With no provider/profile flag we preserve
@@ -215,7 +243,7 @@ MODEL="${MODEL:-$DEFAULT_MODEL}"
 # has. When the caller enters the profile-aware claude-cli lane, Foreman orders
 # profiles from claude-profiles.json, starts with the active profile, and falls
 # forward on opening-request quota errors. Explicit --profile runs stay strict.
-CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-~/.openclaw/claude-profiles.json}}"
+CLAUDE_PROFILES_FILE="${FOREMAN_CLAUDE_PROFILES_FILE:-${CLAUDE_PROFILES_FILE:-$HOME/.openclaw/claude-profiles.json}}"
 AUTH_PROFILE_COOLDOWN_SECONDS="${FOREMAN_CLAUDE_PROFILE_COOLDOWN_SECONDS:-300}"
 AUTH_FALLBACK_MODE="ambient"
 AUTH_CANDIDATE_NAMES=()
@@ -544,6 +572,9 @@ if [[ "$FORCE" != "1" ]]; then
 fi
 
 echo "[foreman] Dispatching: profile=$PROFILE model=$MODEL turns=$MAX_TURNS budget_remaining=\$$REMAINING"
+if [[ -n "$MAX_BUDGET_USD" ]]; then
+  echo "[foreman] Per-run spend cap: \$$MAX_BUDGET_USD"
+fi
 if [[ -n "$AUTH_AUTO_DETECTED" ]]; then
   echo "[foreman] Auto-detected ${#AUTH_CANDIDATE_NAMES[@]} usable Claude profiles; using profile fallback lane."
 fi
@@ -588,6 +619,10 @@ CMD=(
   --verbose
   --no-session-persistence
 )
+
+if [[ -n "$MAX_BUDGET_USD" ]]; then
+  CMD+=(--max-budget-usd "$MAX_BUDGET_USD")
+fi
 
 if [[ "${#EXTRA_ADD_DIR_ARGS[@]}" -gt 0 ]]; then
   CMD+=(--add-dir "${EXTRA_ADD_DIR_ARGS[@]}")
@@ -949,6 +984,7 @@ FOREMAN_PROFILE="$PROFILE" \
 FOREMAN_MODEL="$MODEL" \
 FOREMAN_NUM_TURNS="$NUM_TURNS" \
 FOREMAN_MAX_TURNS="$MAX_TURNS" \
+FOREMAN_MAX_BUDGET_USD="$MAX_BUDGET_USD" \
 FOREMAN_COST="$COST" \
 FOREMAN_STOP_REASON="$STOP_REASON" \
 FOREMAN_PERM_DENIALS="$PERM_DENIALS" \
@@ -977,6 +1013,7 @@ entries.append({
     "model": os.environ.get("FOREMAN_MODEL", ""),
     "turns_used": num("FOREMAN_NUM_TURNS"),
     "max_turns": num("FOREMAN_MAX_TURNS"),
+    "max_budget_usd": num("FOREMAN_MAX_BUDGET_USD", None),
     "cost_usd": num("FOREMAN_COST"),
     "stop_reason": os.environ.get("FOREMAN_STOP_REASON", ""),
     "permission_denial_count": num("FOREMAN_PERM_DENIALS"),
