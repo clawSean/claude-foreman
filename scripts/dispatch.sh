@@ -214,6 +214,15 @@ fi
 
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 
+# Resolve family aliases ourselves so older CLI releases cannot silently choose
+# a previous generation. Explicit version IDs are intentionally left unchanged.
+case "$MODEL" in
+  opus) MODEL="claude-opus-5-5" ;;
+  sonnet) MODEL="claude-sonnet-5" ;;
+  haiku) MODEL="claude-haiku-4-5" ;;
+  fable) MODEL="claude-fable-5-1" ;;
+esac
+
 if [[ -n "$MAX_BUDGET_USD" ]] && ! python3 - "$MAX_BUDGET_USD" <<'PY'
 import math, sys
 try:

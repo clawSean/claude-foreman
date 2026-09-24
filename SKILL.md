@@ -83,7 +83,10 @@ On Linux hosts running as root, `claws-out` is blocked by Claude; use
 
 ## Model And Effort Defaults
 
-- Default model is `opus` across profiles.
+- Default model is `opus` across profiles. The dispatcher resolves `opus` to
+  `claude-opus-5-5`, `sonnet` to `claude-sonnet-5`, `haiku` to
+  `claude-haiku-4-5`, and `fable` to `claude-fable-5-1`; explicit version IDs
+  remain pinned. These mappings do not depend on the installed CLI's defaults.
 - For user-requested Foreman work, pass `--model opus --effort max` unless there
   is a specific reason not to.
 - Use `--model sonnet` only as an explicit lighter-cost escape hatch for routine,

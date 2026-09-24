@@ -63,7 +63,10 @@ Profiles:
 - `wide-open` (root-safe, noninteractive broad-access mode)
 - `claws-out` (🦞 true bypass mode; trusted non-root sandbox targets only)
 
-Default model is **Opus** across profiles. Use `--model sonnet` as an explicit lighter-cost escape hatch.
+Default model is **Opus 5.5** across profiles. Family names resolve to exact IDs:
+`opus` → `claude-opus-5-5`, `sonnet` → `claude-sonnet-5`,
+`haiku` → `claude-haiku-4-5`, `fable` → `claude-fable-5-1`.
+Explicit version IDs stay pinned. Fable still requires an explicit dollar cap.
 
 Compatibility: `unsafe` is still accepted as a legacy alias for `claws-out`. `root-wide` and `claws-wide` are accepted as aliases for `wide-open`.
 
